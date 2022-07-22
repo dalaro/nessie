@@ -509,7 +509,6 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
     final ContentKey contentKey = ContentKey.of("foo");
 
     Operations initialPutWithInvalidExpectedContent = getPutTableOpSingleton(null, null, contentKey, "initial put");
-
     assertThatThrownBy(
       () ->
         unwrap(
@@ -523,20 +522,19 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
       .isInstanceOf(NessieBadRequestException.class)
       .hasMessageStartingWith("Bad Request (HTTP/400): Expected content must not be set when creating new content");
 
-    Operations initialPut = getPutTableOpSingleton(null, contentKey, "initial put");
 
+    Operations initialPut = getPutTableOpSingleton(null, contentKey, "initial put");
     getHttpClient()
       .newRequest()
       .path("trees/branch/{branchName}/commit")
       .resolveTemplate("branchName", branch.getName())
       .queryParam("expectedHash", getHeadHash(branchName))
       .post(initialPut);
-
     Content cont = getHttpClient().newRequest().path("contents/{key}").resolveTemplate("key", contentKey.toPathString()).queryParam("ref", branchName).get().readEntity(Content.class);
     String assignedContentId = cont.getId();
 
-    Operations putWithNullExpectedContentId = getPutTableOpSingleton(assignedContentId, null, contentKey, "putting with null expected content id");
 
+    Operations putWithNullExpectedContentId = getPutTableOpSingleton(assignedContentId, null, contentKey, "putting with null expected content id");
     assertThatThrownBy(
       () ->
         unwrap(
@@ -551,28 +549,7 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
             .hasMessageStartingWith("Bad Request (HTTP/400): Content id for expected content must not be null, key");
 
 
-//    Reference refBranch3 = getApi().getReference().refName(branch.getName()).get();
-//    assertEquals(Reference.ReferenceType.BRANCH, refBranch3.getType());
-//    Branch branch3 = Branch.of(branch.getName(), refBranch3.getHash());
-//
-//    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, assignedContentId);
-//    expectedContent =
-//      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, "blah blah blah");
-//    Operation.Put putExistingRef3 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
-//
-//    // 3) verify that the content id of the content in a Put operation is equal to the content id of a non-empty expectedContent
-//    // (for an existing ref, request-supplied expected contentid == existing contentid =? request-supplied to-write contentid)
-//    assertThatThrownBy( () ->
-//      getApi()
-//        .commitMultipleOperations()
-//        .branch(branch3)
-//        .operation(putExistingRef3)
-//        .commitMeta(CommitMeta.fromMessage("commit 1"))
-//        .commit()).hasMessageContaining("content differ for key 'foo'");
-//
-
     Operations putWithIncorrectExpectedContentId = getPutTableOpSingleton(assignedContentId, "foobar", contentKey, "put with invalid expected content id");
-
     assertThatThrownBy(
       () ->
         unwrap(
@@ -587,8 +564,7 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
       .hasMessageContaining("content differ for key 'foo'");
 
 
-    Operations putWithIncorrectNewContentId = getPutTableOpSingleton("foobaz", assignedContentId, contentKey, "put ???");
-
+    Operations putWithIncorrectNewContentId = getPutTableOpSingleton("foobaz", assignedContentId, contentKey, "put with incorrect new content id");
     assertThatThrownBy(
       () ->
         unwrap(
@@ -601,25 +577,9 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
               .post(putWithIncorrectNewContentId)))
       .isInstanceOf(NessieBadRequestException.class)
       .hasMessage("Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'", "foobaz", assignedContentId, contentKey.toPathString());
-//      .hasMessageContaining("content differ for key 'foo'");
 
-
-//    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, "blah blah blah");
-//    expectedContent =
-//      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, "blah blah blah");
-//    Operation.Put putExistingRef4 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
-//
-//
-//    getApi()
-//      .commitMultipleOperations()
-//      .branch(branch3)
-//      .operation(putExistingRef4)
-//      .commitMeta(CommitMeta.fromMessage("commit 1"))
-//      .commit();
-//
-
+    
     Operations putWithMatchingFakeContentIds = getPutTableOpSingleton("fake id", "fake id", contentKey, "put with matching fake content ids");
-
     // TODO should this fail?
     getHttpClient()
       .newRequest()
@@ -627,54 +587,6 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
       .resolveTemplate("branchName", branchName)
       .queryParam("expectedHash", getHeadHash(branchName))
       .post(putWithMatchingFakeContentIds);
-
-//
-//    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, "blah blah blah");
-//    expectedContent =
-//      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, assignedContentId);
-//    Operation.Put putExistingRef5 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
-//
-//
-//    assertThatThrownBy( () ->
-//      getApi()
-//        .commitMultipleOperations()
-//        .branch(branch3)
-//        .operation(putExistingRef5)
-//        .commitMeta(CommitMeta.fromMessage("commit 1"))
-//        .commit()).hasMessageContaining("content differ for key 'foo'");
-
-
-/////////////////////////////////////////////////////////////////////////////////////////
-
-
-//            ReferencesResponse rr = getHttpClient()
-//              .newRequest()
-//              .path("trees/branch/{branchName}")
-//              .resolveTemplate("branchName", branch.getName())
-////              .queryParam("expectedHash", validHash)
-//              .put(put)
-//              .readEntity(ReferencesResponse.class);
-
-
-//    assertThatThrownBy(
-//      () ->
-//        unwrap(
-//          () ->
-//
-//    getHttpClient()
-//      .newRequest()
-//      .path("trees/branch/{branchName}")
-//      .resolveTemplate("branchName", branch.getName())
-//              .queryParam("expectedHash", validHash)
-//      .put(expectedContent)))
-//            .isInstanceOf(NessieBadRequestException.class)
-//            .hasMessageStartingWith(
-//              "Bad Request (HTTP/400): Cannot construct instance of "
-//                + "`org.projectnessie.model.ImmutableTag`, problem: "
-//                + REF_NAME_MESSAGE
-//                + " - but was: "
-//                + invalidTagName
-//                + "\n")
   }
 
   void unwrap(Executable exec) throws Throwable {
