@@ -17,6 +17,8 @@ package org.projectnessie.jaxrs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.projectnessie.model.Validation.REF_NAME_MESSAGE;
 
 import com.google.common.collect.ImmutableList;
@@ -29,10 +31,14 @@ import org.projectnessie.error.BaseNessieClientServerException;
 import org.projectnessie.error.NessieBadRequestException;
 import org.projectnessie.error.NessieNotFoundException;
 import org.projectnessie.model.Branch;
+import org.projectnessie.model.CommitMeta;
 import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.EntriesResponse;
+import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.LogResponse;
+import org.projectnessie.model.Operation;
+import org.projectnessie.model.Reference;
 
 /** See {@link AbstractTestRest} for details about and reason for the inheritance model. */
 public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
@@ -154,5 +160,117 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
         .hasMessageContaining(
             String.format(
                 "Could not find commit '%s' in reference '%s'.", invalidHash, branch.getName()));
+  }
+
+  @Test
+  public void invalidPutViaAPI() throws BaseNessieClientServerException
+  {
+    Branch branch = createBranch("invalidPut");
+
+    ContentKey contentKey = ContentKey.of("foo");
+    IcebergTable contentToWrite =
+      IcebergTable.of("/iceberg/table", 42, 42, 42, 42);
+    IcebergTable expectedContent =
+      IcebergTable.of("/iceberg/table", 777, 777, 777, 777);
+    Operation.Put putExistingRef = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+
+    Operation.Put putNewRef = Operation.Put.of(contentKey, expectedContent);
+
+    // 1) every Put operation for a new content key must have an empty/no expectedContent
+    assertThatThrownBy( () ->
+      getApi()
+        .commitMultipleOperations()
+        .branch(branch)
+        .operation(putExistingRef)
+        .commitMeta(CommitMeta.fromMessage("commit 1"))
+        .commit())
+      .hasMessageStartingWith("Bad Request (HTTP/400): Expected content must not be set when creating new content");
+
+
+    getApi()
+      .commitMultipleOperations()
+      .branch(branch)
+      .operation(putNewRef)
+      .commitMeta(CommitMeta.fromMessage("commit 1"))
+      .commit();
+
+    // TODO get the reference we just put, and read its server-assigned content id (really UUID.random)
+    Map<ContentKey, Content> contents = getApi()
+      .getContent()
+      .key(contentKey)
+      .refName(branch.getName())
+      .get();
+
+    // TODO rely on AbstractMapAssert via assertj statics instead
+    assertNotNull(contents);
+    assertEquals(1, contents.size());
+    Map.Entry<ContentKey, Content> ent = contents.entrySet().iterator().next();
+    String assignedContentId = ent.getValue().getId();
+
+    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, assignedContentId);
+
+    expectedContent =
+      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, assignedContentId);
+    Operation.Put putExistingRef2 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+
+    Reference refBranch2 = getApi().getReference().refName(branch.getName()).get();
+    assertEquals(Reference.ReferenceType.BRANCH, refBranch2.getType());
+    Branch branch2 = Branch.of(branch.getName(), refBranch2.getHash());
+
+    // 2) every Put operation for an existing content key must have a non-empty expectedContent
+    getApi()
+      .commitMultipleOperations()
+      .branch(branch2)
+      .operation(putExistingRef2)
+      .commitMeta(CommitMeta.fromMessage("commit 2"))
+      .commit();
+
+    Reference refBranch3 = getApi().getReference().refName(branch.getName()).get();
+    assertEquals(Reference.ReferenceType.BRANCH, refBranch3.getType());
+    Branch branch3 = Branch.of(branch.getName(), refBranch3.getHash());
+
+    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, assignedContentId);
+    expectedContent =
+      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, "blah blah blah");
+    Operation.Put putExistingRef3 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+
+    // 3) verify that the content id of the content in a Put operation is equal to the content id of a non-empty expectedContent
+    // (for an existing ref, request-supplied expected contentid == existing contentid =? request-supplied to-write contentid)
+    assertThatThrownBy( () ->
+      getApi()
+        .commitMultipleOperations()
+        .branch(branch3)
+        .operation(putExistingRef3)
+        .commitMeta(CommitMeta.fromMessage("commit 1"))
+        .commit()).hasMessageContaining("content differ for key 'foo'");
+
+    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, "blah blah blah");
+    expectedContent =
+      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, "blah blah blah");
+    Operation.Put putExistingRef4 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+
+
+    getApi()
+      .commitMultipleOperations()
+      .branch(branch3)
+      .operation(putExistingRef4)
+      .commitMeta(CommitMeta.fromMessage("commit 1"))
+      .commit();
+
+
+    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, "blah blah blah");
+    expectedContent =
+      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, assignedContentId);
+    Operation.Put putExistingRef5 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+
+
+    assertThatThrownBy( () ->
+      getApi()
+        .commitMultipleOperations()
+        .branch(branch3)
+        .operation(putExistingRef5)
+        .commitMeta(CommitMeta.fromMessage("commit 1"))
+        .commit()).hasMessageContaining("content differ for key 'foo'");
+
   }
 }

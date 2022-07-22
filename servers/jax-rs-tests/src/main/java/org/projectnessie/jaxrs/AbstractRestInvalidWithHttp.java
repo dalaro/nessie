@@ -18,20 +18,37 @@ package org.projectnessie.jaxrs;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.projectnessie.model.Validation.HASH_MESSAGE;
 import static org.projectnessie.model.Validation.REF_NAME_MESSAGE;
 
 import org.assertj.core.api.Assumptions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.projectnessie.client.http.HttpClientException;
+import org.projectnessie.client.http.HttpResponse;
+import org.projectnessie.error.BaseNessieClientServerException;
 import org.projectnessie.error.NessieBadRequestException;
 import org.projectnessie.error.NessieConflictException;
 import org.projectnessie.error.NessieNotFoundException;
+import org.projectnessie.model.Branch;
 import org.projectnessie.model.CommitMeta;
+import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
+import org.projectnessie.model.IcebergTable;
+import org.projectnessie.model.ImmutableOperations;
+import org.projectnessie.model.Operation;
+import org.projectnessie.model.Operations;
+import org.projectnessie.model.Reference;
+import org.projectnessie.model.ReferencesResponse;
+import org.projectnessie.model.TableReference;
 import org.projectnessie.model.Tag;
+
+import java.util.Map;
 
 /** See {@link AbstractTestRest} for details about and reason for the inheritance model. */
 public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRefs {
@@ -368,7 +385,8 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
     "abc'de..blah" + COMMA_VALID_HASH_3,
     "abc'de@{blah" + COMMA_VALID_HASH_3
   })
-  public void invalidTags(String invalidTagNameIn, String validHash) {
+  public void invalidTags(String invalidTagNameIn, String validHash)
+  {
     Assumptions.assumeThat(getHttpClient()).isNotNull();
     // CsvSource maps an empty string as null
     String invalidTagName = invalidTagNameIn != null ? invalidTagNameIn : "";
@@ -377,86 +395,286 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
     // Need the string-ified JSON representation of `Tag` here, because `Tag` itself performs
     // validation.
     String tag =
-        "{\"type\": \"TAG\", \"name\": \""
-            + invalidTagName
-            + "\", \"hash\": \""
-            + validHash
-            + "\"}";
+      "{\"type\": \"TAG\", \"name\": \""
+        + invalidTagName
+        + "\", \"hash\": \""
+        + validHash
+        + "\"}";
     String branch =
-        "{\"type\": \"BRANCH\", \"name\": \""
-            + invalidTagName
-            + "\", \"hash\": \""
-            + validHash
-            + "\"}";
+      "{\"type\": \"BRANCH\", \"name\": \""
+        + invalidTagName
+        + "\", \"hash\": \""
+        + validHash
+        + "\"}";
     String different =
-        "{\"type\": \"FOOBAR\", \"name\": \""
-            + invalidTagName
-            + "\", \"hash\": \""
-            + validHash
-            + "\"}";
+      "{\"type\": \"FOOBAR\", \"name\": \""
+        + invalidTagName
+        + "\", \"hash\": \""
+        + validHash
+        + "\"}";
     assertAll(
-        () ->
-            assertThatThrownBy(
-                    () ->
-                        unwrap(
-                            () ->
-                                getHttpClient()
-                                    .newRequest()
-                                    .path("trees/tag/{tagName}")
-                                    .resolveTemplate("tagName", validBranchName)
-                                    .queryParam("expectedHash", validHash)
-                                    .put(null)))
-                .isInstanceOf(NessieBadRequestException.class)
-                .hasMessageStartingWith("Bad Request (HTTP/400):")
-                .hasMessageContaining(".assignTo: must not be null"),
-        () ->
-            assertThatThrownBy(
-                    () ->
-                        unwrap(
-                            () ->
-                                getHttpClient()
-                                    .newRequest()
-                                    .path("trees/tag/{tagName}")
-                                    .resolveTemplate("tagName", validBranchName)
-                                    .queryParam("expectedHash", validHash)
-                                    .put(tag)))
-                .isInstanceOf(NessieBadRequestException.class)
-                .hasMessageStartingWith(
-                    "Bad Request (HTTP/400): Cannot construct instance of "
-                        + "`org.projectnessie.model.ImmutableTag`, problem: "
-                        + REF_NAME_MESSAGE
-                        + " - but was: "
-                        + invalidTagName
-                        + "\n"),
-        () ->
-            assertThatThrownBy(
-                    () ->
-                        unwrap(
-                            () ->
-                                getHttpClient()
-                                    .newRequest()
-                                    .path("trees/tag/{tagName}")
-                                    .resolveTemplate("tagName", validBranchName)
-                                    .queryParam("expectedHash", validHash)
-                                    .put(branch)))
-                .isInstanceOf(NessieBadRequestException.class)
-                .hasMessageStartingWith("Bad Request (HTTP/400): Cannot construct instance of ")
-                .hasMessageContaining(REF_NAME_MESSAGE),
-        () ->
-            assertThatThrownBy(
-                    () ->
-                        unwrap(
-                            () ->
-                                getHttpClient()
-                                    .newRequest()
-                                    .path("trees/tag/{tagName}")
-                                    .resolveTemplate("tagName", validBranchName)
-                                    .queryParam("expectedHash", validHash)
-                                    .put(different)))
-                .isInstanceOf(NessieBadRequestException.class)
-                .hasMessageStartingWith(
-                    "Bad Request (HTTP/400): Could not resolve type id 'FOOBAR' as a subtype of "
-                        + "`org.projectnessie.model.Reference`: known type ids = ["));
+      () ->
+        assertThatThrownBy(
+          () ->
+            unwrap(
+              () ->
+                getHttpClient()
+                  .newRequest()
+                  .path("trees/tag/{tagName}")
+                  .resolveTemplate("tagName", validBranchName)
+                  .queryParam("expectedHash", validHash)
+                  .put(null)))
+          .isInstanceOf(NessieBadRequestException.class)
+          .hasMessageStartingWith("Bad Request (HTTP/400):")
+          .hasMessageContaining(".assignTo: must not be null"),
+      () ->
+        assertThatThrownBy(
+          () ->
+            unwrap(
+              () ->
+                getHttpClient()
+                  .newRequest()
+                  .path("trees/tag/{tagName}")
+                  .resolveTemplate("tagName", validBranchName)
+                  .queryParam("expectedHash", validHash)
+                  .put(tag)))
+          .isInstanceOf(NessieBadRequestException.class)
+          .hasMessageStartingWith(
+            "Bad Request (HTTP/400): Cannot construct instance of "
+              + "`org.projectnessie.model.ImmutableTag`, problem: "
+              + REF_NAME_MESSAGE
+              + " - but was: "
+              + invalidTagName
+              + "\n"),
+      () ->
+        assertThatThrownBy(
+          () ->
+            unwrap(
+              () ->
+                getHttpClient()
+                  .newRequest()
+                  .path("trees/tag/{tagName}")
+                  .resolveTemplate("tagName", validBranchName)
+                  .queryParam("expectedHash", validHash)
+                  .put(branch)))
+          .isInstanceOf(NessieBadRequestException.class)
+          .hasMessageStartingWith("Bad Request (HTTP/400): Cannot construct instance of ")
+          .hasMessageContaining(REF_NAME_MESSAGE),
+      () ->
+        assertThatThrownBy(
+          () ->
+            unwrap(
+              () ->
+                getHttpClient()
+                  .newRequest()
+                  .path("trees/tag/{tagName}")
+                  .resolveTemplate("tagName", validBranchName)
+                  .queryParam("expectedHash", validHash)
+                  .put(different)))
+          .isInstanceOf(NessieBadRequestException.class)
+          .hasMessageStartingWith(
+            "Bad Request (HTTP/400): Could not resolve type id 'FOOBAR' as a subtype of "
+              + "`org.projectnessie.model.Reference`: known type ids = ["));
+  }
+
+  private static IcebergTable getIcebergTable(String contentId)
+  {
+    return IcebergTable.of("/iceberg/table", 42, 42, 42, 42, contentId);
+  }
+
+  private static Operations getPutTableOpSingleton(String newContentId, String expectedContentId, ContentKey contentKey, String commitMessage)
+  {
+    IcebergTable newTable = getIcebergTable(newContentId);
+    IcebergTable expectedTable = getIcebergTable(expectedContentId);
+    final Operation.Put op = Operation.Put.of(contentKey, newTable, expectedTable);
+    return ImmutableOperations.builder().addOperations(op).commitMeta(CommitMeta.fromMessage(commitMessage)).build();
+  }
+  private static Operations getPutTableOpSingleton(String newContentId, ContentKey contentKey, String commitMessage)
+  {
+    IcebergTable newTable = getIcebergTable(newContentId);
+    final Operation.Put op = Operation.Put.of(contentKey, newTable);
+    return ImmutableOperations.builder().addOperations(op).commitMeta(CommitMeta.fromMessage(commitMessage)).build();
+  }
+
+  private String getHeadHash(String branchName) {
+    Reference brh = getHttpClient().newRequest().path("trees/tree/{ref}").resolveTemplate("ref", branchName).queryParam("fetch", "MINIMAL").get().readEntity(Reference.class);
+    return brh.getHash();
+  }
+
+  @Test
+  public void invalidPutViaHttp() throws BaseNessieClientServerException
+  {
+    final String branchName = "invalidPutViaHttp";
+    final Branch branch = createBranch(branchName);
+    final ContentKey contentKey = ContentKey.of("foo");
+
+    Operations initialPutWithInvalidExpectedContent = getPutTableOpSingleton(null, null, contentKey, "initial put");
+
+    assertThatThrownBy(
+      () ->
+        unwrap(
+          () ->
+            getHttpClient()
+              .newRequest()
+              .path("trees/branch/{branchName}/commit")
+              .resolveTemplate("branchName", branchName)
+              .queryParam("expectedHash", getHeadHash(branchName))
+              .post(initialPutWithInvalidExpectedContent)))
+      .isInstanceOf(NessieBadRequestException.class)
+      .hasMessageStartingWith("Bad Request (HTTP/400): Expected content must not be set when creating new content");
+
+    Operations initialPut = getPutTableOpSingleton(null, contentKey, "initial put");
+
+    getHttpClient()
+      .newRequest()
+      .path("trees/branch/{branchName}/commit")
+      .resolveTemplate("branchName", branch.getName())
+      .queryParam("expectedHash", getHeadHash(branchName))
+      .post(initialPut);
+
+    Content cont = getHttpClient().newRequest().path("contents/{key}").resolveTemplate("key", contentKey.toPathString()).queryParam("ref", branchName).get().readEntity(Content.class);
+    String assignedContentId = cont.getId();
+
+    Operations putWithNullExpectedContentId = getPutTableOpSingleton(assignedContentId, null, contentKey, "putting with null expected content id");
+
+    assertThatThrownBy(
+      () ->
+        unwrap(
+          () ->
+    getHttpClient()
+      .newRequest()
+      .path("trees/branch/{branchName}/commit")
+      .resolveTemplate("branchName", branchName)
+      .queryParam("expectedHash", getHeadHash(branchName))
+      .post(putWithNullExpectedContentId)))
+            .isInstanceOf(NessieBadRequestException.class)
+            .hasMessageStartingWith("Bad Request (HTTP/400): Content id for expected content must not be null, key");
+
+
+//    Reference refBranch3 = getApi().getReference().refName(branch.getName()).get();
+//    assertEquals(Reference.ReferenceType.BRANCH, refBranch3.getType());
+//    Branch branch3 = Branch.of(branch.getName(), refBranch3.getHash());
+//
+//    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, assignedContentId);
+//    expectedContent =
+//      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, "blah blah blah");
+//    Operation.Put putExistingRef3 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+//
+//    // 3) verify that the content id of the content in a Put operation is equal to the content id of a non-empty expectedContent
+//    // (for an existing ref, request-supplied expected contentid == existing contentid =? request-supplied to-write contentid)
+//    assertThatThrownBy( () ->
+//      getApi()
+//        .commitMultipleOperations()
+//        .branch(branch3)
+//        .operation(putExistingRef3)
+//        .commitMeta(CommitMeta.fromMessage("commit 1"))
+//        .commit()).hasMessageContaining("content differ for key 'foo'");
+//
+
+    Operations putWithIncorrectExpectedContentId = getPutTableOpSingleton(assignedContentId, "foobar", contentKey, "put with invalid expected content id");
+
+    assertThatThrownBy(
+      () ->
+        unwrap(
+          () ->
+            getHttpClient()
+              .newRequest()
+              .path("trees/branch/{branchName}/commit")
+              .resolveTemplate("branchName", branchName)
+              .queryParam("expectedHash", getHeadHash(branchName))
+              .post(putWithIncorrectExpectedContentId)))
+      .isInstanceOf(NessieBadRequestException.class)
+      .hasMessageContaining("content differ for key 'foo'");
+
+
+    Operations putWithIncorrectNewContentId = getPutTableOpSingleton("foobaz", assignedContentId, contentKey, "put ???");
+
+    assertThatThrownBy(
+      () ->
+        unwrap(
+          () ->
+            getHttpClient()
+              .newRequest()
+              .path("trees/branch/{branchName}/commit")
+              .resolveTemplate("branchName", branchName)
+              .queryParam("expectedHash", getHeadHash(branchName))
+              .post(putWithIncorrectNewContentId)))
+      .isInstanceOf(NessieBadRequestException.class)
+      .hasMessage("Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'", "foobaz", assignedContentId, contentKey.toPathString());
+//      .hasMessageContaining("content differ for key 'foo'");
+
+
+//    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, "blah blah blah");
+//    expectedContent =
+//      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, "blah blah blah");
+//    Operation.Put putExistingRef4 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+//
+//
+//    getApi()
+//      .commitMultipleOperations()
+//      .branch(branch3)
+//      .operation(putExistingRef4)
+//      .commitMeta(CommitMeta.fromMessage("commit 1"))
+//      .commit();
+//
+
+    Operations putWithMatchingFakeContentIds = getPutTableOpSingleton("fake id", "fake id", contentKey, "put with matching fake content ids");
+
+    // TODO should this fail?
+    getHttpClient()
+      .newRequest()
+      .path("trees/branch/{branchName}/commit")
+      .resolveTemplate("branchName", branchName)
+      .queryParam("expectedHash", getHeadHash(branchName))
+      .post(putWithMatchingFakeContentIds);
+
+//
+//    contentToWrite = IcebergTable.of("/iceberg/table", 42, 42, 42, 42, "blah blah blah");
+//    expectedContent =
+//      IcebergTable.of("/iceberg/table", 777, 777, 777, 777, assignedContentId);
+//    Operation.Put putExistingRef5 = Operation.Put.of(contentKey, contentToWrite, expectedContent);
+//
+//
+//    assertThatThrownBy( () ->
+//      getApi()
+//        .commitMultipleOperations()
+//        .branch(branch3)
+//        .operation(putExistingRef5)
+//        .commitMeta(CommitMeta.fromMessage("commit 1"))
+//        .commit()).hasMessageContaining("content differ for key 'foo'");
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+
+
+//            ReferencesResponse rr = getHttpClient()
+//              .newRequest()
+//              .path("trees/branch/{branchName}")
+//              .resolveTemplate("branchName", branch.getName())
+////              .queryParam("expectedHash", validHash)
+//              .put(put)
+//              .readEntity(ReferencesResponse.class);
+
+
+//    assertThatThrownBy(
+//      () ->
+//        unwrap(
+//          () ->
+//
+//    getHttpClient()
+//      .newRequest()
+//      .path("trees/branch/{branchName}")
+//      .resolveTemplate("branchName", branch.getName())
+//              .queryParam("expectedHash", validHash)
+//      .put(expectedContent)))
+//            .isInstanceOf(NessieBadRequestException.class)
+//            .hasMessageStartingWith(
+//              "Bad Request (HTTP/400): Cannot construct instance of "
+//                + "`org.projectnessie.model.ImmutableTag`, problem: "
+//                + REF_NAME_MESSAGE
+//                + " - but was: "
+//                + invalidTagName
+//                + "\n")
   }
 
   void unwrap(Executable exec) throws Throwable {
