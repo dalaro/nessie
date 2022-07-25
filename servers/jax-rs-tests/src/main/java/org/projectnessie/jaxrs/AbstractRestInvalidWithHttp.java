@@ -599,16 +599,23 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
      * The expected and to-be-written content IDs are both "fake id".
      * This intentionally mismatches the server-assigned UUID of the existing content at this key.
      */
+    String fakeId = "fake id";
     Operations putWithMatchingFakeContentIds =
         getPutTableOpSingleton(
-            "fake id", "fake id", contentKey, "put with matching fake content ids");
-    // TODO should this fail?
-    getHttpClient()
+            fakeId, fakeId, contentKey, "put with matching fake content ids");
+    assertThatThrownBy(
+      () ->
+        unwrap(
+          () ->
+
+            getHttpClient()
         .newRequest()
         .path("trees/branch/{branchName}/commit")
         .resolveTemplate("branchName", branchName)
         .queryParam("expectedHash", getHeadHash(branchName))
-        .post(putWithMatchingFakeContentIds);
+        .post(putWithMatchingFakeContentIds)))
+      .isInstanceOf(NessieBadRequestException.class)
+      .hasMessageContaining("Mismatch between expected content-id '%s' and actual content-id", fakeId);
   }
 
   void unwrap(Executable exec) throws Throwable {

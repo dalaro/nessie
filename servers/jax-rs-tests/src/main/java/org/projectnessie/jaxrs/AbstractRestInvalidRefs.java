@@ -229,15 +229,18 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
                     .commit())
         .hasMessageContaining("content differ for key 'foo'");
 
-    // TODO should this fail?
+    String fakeId = "foobar";
     Operation.Put putWithMatchingFakeContentIds =
-        Operation.Put.of(contentKey, getIcebergTable("foobar"), getIcebergTable("foobar"));
+        Operation.Put.of(contentKey, getIcebergTable(fakeId), getIcebergTable(fakeId));
+    assertThatThrownBy(
+      () ->
     getApi()
         .commitMultipleOperations()
         .branch(getBranch(branchName))
         .operation(putWithMatchingFakeContentIds)
         .commitMeta(CommitMeta.fromMessage("put with matching fake content ids"))
-        .commit();
+        .commit())
+      .hasMessageContaining("Mismatch between expected content-id '%s' and actual content-id", fakeId);
 
     Operation.Put putWithIncorrectNewContentId =
         Operation.Put.of(contentKey, getIcebergTable("foobar"), getIcebergTable(assignedContentId));

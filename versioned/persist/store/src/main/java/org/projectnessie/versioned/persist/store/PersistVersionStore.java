@@ -65,6 +65,7 @@ import org.projectnessie.versioned.persist.adapter.ContentIdAndBytes;
 import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
 import org.projectnessie.versioned.persist.adapter.ImmutableCommitParams;
 import org.projectnessie.versioned.persist.adapter.KeyFilterPredicate;
+import org.projectnessie.versioned.persist.adapter.KeyListEntry;
 import org.projectnessie.versioned.persist.adapter.KeyWithBytes;
 import org.projectnessie.versioned.persist.adapter.MergeParams;
 import org.projectnessie.versioned.persist.adapter.RefLog;
@@ -110,6 +111,8 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
             .commitMetaSerialized(serializeMetadata(metadata))
             .validator(validator);
 
+    Map<Key, ContentId> expectedContentIdByKey = new HashMap<>();
+
     for (Operation<CONTENT> operation : operations) {
       if (operation instanceof Put) {
         Put<CONTENT> op = (Put<CONTENT>) operation;
@@ -151,6 +154,10 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
               contentId,
               expectedContentId,
               op.getKey());
+          // Retain this (content-key, expected-content-id) pair for conflict-check against existing committed data
+          if (expectedHead.isPresent()) {
+            expectedContentIdByKey.put(op.getKey(), expectedContentId);
+          }
         }
 
         Preconditions.checkState(
@@ -162,6 +169,34 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
         commitAttempt.addUnchanged(operation.getKey());
       } else {
         throw new IllegalArgumentException(String.format("Unknown operation type '%s'", operation));
+      }
+    }
+
+    /*
+     * If expectedHead is present, then attempt to detect conflicts between:
+     *
+     * a) expected content-ids provided by Put operations, and
+     *
+     * b) actual content-ids present at the HEAD referenced by expectedHash (at the same content-keys)
+     */
+    if (expectedHead.isPresent()) {
+      // Retrieve keys where the key's actual content-id does not match a Put operation's expected content-id
+      KeyFilterPredicate brokenPutExpectationsPredicate = (key, contentId, type) -> {
+        ContentId expectedContentId = expectedContentIdByKey.get(key);
+        return null != expectedContentId && !contentId.equals(expectedContentId);
+      };
+      Stream<KeyListEntry> conflictEntries = databaseAdapter.keys(expectedHead.get(), brokenPutExpectationsPredicate);
+
+      // TODO consider logging additional conflicts, if present, or perhaps adding a count of suppressed conflicts
+      Optional<KeyListEntry> conflictEntry = conflictEntries.findFirst();
+      if (conflictEntry.isPresent()) {
+        KeyListEntry kle = conflictEntry.get();
+        ContentId existing = kle.getContentId();
+        Key key = kle.getKey();
+        ContentId expected = expectedContentIdByKey.get(key);
+        Preconditions.checkState(null != expected, String.format("Null expected content-id for key '%s'", key));
+        throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
+          expected, existing, key));
       }
     }
 

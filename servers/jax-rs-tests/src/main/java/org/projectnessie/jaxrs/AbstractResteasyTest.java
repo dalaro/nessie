@@ -167,6 +167,16 @@ public abstract class AbstractResteasyTest {
             .as(Branch.class);
     Assertions.assertNotEquals(branch.getHash(), commitResponse.getHash());
 
+    // Fetch the content at xxx.test again, reflecting changes committed via updates[10]
+    table =
+      rest()
+        .queryParam("ref", "test")
+        .get("contents/xxx.test")
+        .then()
+        .statusCode(200)
+        .extract()
+        .as(IcebergTable.class);
+
     Response res =
         rest().queryParam("ref", "test").get("contents/xxx.test").then().extract().response();
     Assertions.assertEquals(updates[10].getContent(), withoutId(res.body().as(Content.class)));
