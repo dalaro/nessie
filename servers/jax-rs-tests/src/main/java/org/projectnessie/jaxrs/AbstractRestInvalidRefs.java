@@ -240,7 +240,7 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
         .operation(putWithMatchingFakeContentIds)
         .commitMeta(CommitMeta.fromMessage("put with matching fake content ids"))
         .commit())
-      .hasMessageContaining("Mismatch between expected content-id '%s' and actual content-id", fakeId);
+      .hasMessageContaining("Conflict between expected content-id '%s' and actual content-id", fakeId);
 
     Operation.Put putWithIncorrectNewContentId =
         Operation.Put.of(contentKey, getIcebergTable("foobar"), getIcebergTable(assignedContentId));

@@ -615,7 +615,7 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
         .queryParam("expectedHash", getHeadHash(branchName))
         .post(putWithMatchingFakeContentIds)))
       .isInstanceOf(NessieBadRequestException.class)
-      .hasMessageContaining("Mismatch between expected content-id '%s' and actual content-id", fakeId);
+      .hasMessageContaining("Conflict between expected content-id '%s' and actual content-id", fakeId);
   }
 
   void unwrap(Executable exec) throws Throwable {

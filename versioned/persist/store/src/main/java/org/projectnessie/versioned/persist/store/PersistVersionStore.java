@@ -180,24 +180,31 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
      * b) actual content-ids present at the HEAD referenced by expectedHash (at the same content-keys)
      */
     if (expectedHead.isPresent()) {
-      // Retrieve keys where the key's actual content-id does not match a Put operation's expected content-id
-      KeyFilterPredicate brokenPutExpectationsPredicate = (key, contentId, type) -> {
-        ContentId expectedContentId = expectedContentIdByKey.get(key);
-        return null != expectedContentId && !contentId.equals(expectedContentId);
-      };
-      Stream<KeyListEntry> conflictEntries = databaseAdapter.keys(expectedHead.get(), brokenPutExpectationsPredicate);
+      Callable<Void> putExpectationsValidator = () -> {
+        // Retrieve keys where the key's actual content-id does not match a Put operation's expected content-id
+        KeyFilterPredicate brokenPutExpectationsPredicate = (key, contentId, type) -> {
+          ContentId expectedContentId = expectedContentIdByKey.get(key);
+          return null != expectedContentId && !contentId.equals(expectedContentId);
+        };
+        Stream<KeyListEntry> conflictEntries = databaseAdapter.keys(expectedHead.get(), brokenPutExpectationsPredicate);
 
-      // TODO consider logging additional conflicts, if present, or perhaps adding a count of suppressed conflicts
-      Optional<KeyListEntry> conflictEntry = conflictEntries.findFirst();
-      if (conflictEntry.isPresent()) {
-        KeyListEntry kle = conflictEntry.get();
-        ContentId existing = kle.getContentId();
-        Key key = kle.getKey();
-        ContentId expected = expectedContentIdByKey.get(key);
-        Preconditions.checkState(null != expected, String.format("Null expected content-id for key '%s'", key));
-        throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
-          expected, existing, key));
-      }
+        // TODO consider logging additional conflicts, if present, or perhaps adding a count of suppressed conflicts
+        Optional<KeyListEntry> conflictEntry = conflictEntries.findFirst();
+        if (conflictEntry.isPresent()) {
+          KeyListEntry kle = conflictEntry.get();
+          ContentId existing = kle.getContentId();
+          Key key = kle.getKey();
+          ContentId expected = expectedContentIdByKey.get(key);
+          Preconditions.checkState(null != expected, String.format("Null expected content-id for key '%s'", key));
+          throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
+            expected, existing, key));
+        }
+
+        return null;
+      };
+
+      Callable<Void> combinedValidator = () -> { validator.call(); putExpectationsValidator.call(); return null; };
+      commitAttempt.validator(combinedValidator);
     }
 
     return databaseAdapter.commit(commitAttempt.build());
