@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalInt;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -45,6 +46,7 @@ import org.projectnessie.error.BaseNessieClientServerException;
 import org.projectnessie.error.NessieNotFoundException;
 import org.projectnessie.model.Branch;
 import org.projectnessie.model.CommitMeta;
+import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.IcebergView;
@@ -412,19 +414,46 @@ public abstract class AbstractRestCommitLog extends AbstractRestAssign {
 
     String currentHash = branch.getHash();
     List<String> allMessages = new ArrayList<>();
+    final ContentKey tableContentKey = ContentKey.of("table");
+    String tableContentId = null;
     for (int i = 0; i < commits; i++) {
       String msg = "message-for-" + i;
       allMessages.add(msg);
-      IcebergTable tableMeta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
+      final IcebergTable tableMeta, expectedTableMeta;
+      if (null != tableContentId) {
+        tableMeta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42, tableContentId);
+        expectedTableMeta = IcebergTable.of("some-file-" + (i-1), 42, 42, 42, 42, tableContentId);
+      } else {
+        tableMeta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
+        expectedTableMeta = null;
+      }
+
+      final Put putOperation;
+
+      if (null == expectedTableMeta) {
+        putOperation = Put.of(tableContentKey, tableMeta);
+      } else {
+        putOperation = Put.of(tableContentKey, tableMeta, expectedTableMeta);
+      }
+
       String nextHash =
           getApi()
               .commitMultipleOperations()
               .branchName(branch.getName())
               .hash(currentHash)
               .commitMeta(CommitMeta.fromMessage(msg))
-              .operation(Put.of(ContentKey.of("table"), tableMeta))
+              .operation(putOperation)
               .commit()
               .getHash();
+
+      Map<ContentKey, Content> contentMap = getApi()
+        .getContent()
+        .refName(branch.getName())
+        .key(tableContentKey)
+        .get();
+
+      Content tableContent = contentMap.get(tableContentKey);
+      tableContentId = tableContent.getId();
       assertNotEquals(currentHash, nextHash);
       currentHash = nextHash;
     }

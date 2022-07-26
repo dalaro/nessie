@@ -20,9 +20,11 @@ import com.google.protobuf.ByteString;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
@@ -158,6 +160,8 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
           if (expectedHead.isPresent()) {
             expectedContentIdByKey.put(op.getKey(), expectedContentId);
           }
+        } else if (expectedHead.isPresent()) {
+          expectedContentIdByKey.put(op.getKey(), null);
         }
 
         Preconditions.checkState(
@@ -181,24 +185,38 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
      */
     if (expectedHead.isPresent()) {
       Callable<Void> putExpectationsValidator = () -> {
-        // Retrieve keys where the key's actual content-id does not match a Put operation's expected content-id
-        KeyFilterPredicate brokenPutExpectationsPredicate = (key, contentId, type) -> {
-          ContentId expectedContentId = expectedContentIdByKey.get(key);
-          return null != expectedContentId && !contentId.equals(expectedContentId);
-        };
-        Stream<KeyListEntry> conflictEntries = databaseAdapter.keys(expectedHead.get(), brokenPutExpectationsPredicate);
+        Stream<KeyListEntry> allEntries = databaseAdapter.keys(expectedHead.get(), KeyFilterPredicate.ALLOW_ALL);
 
-        // TODO consider logging additional conflicts, if present, or perhaps adding a count of suppressed conflicts
-        Optional<KeyListEntry> conflictEntry = conflictEntries.findFirst();
-        if (conflictEntry.isPresent()) {
-          KeyListEntry kle = conflictEntry.get();
-          ContentId existing = kle.getContentId();
+        allEntries.forEach( kle -> {
+          ContentId actual = kle.getContentId();
           Key key = kle.getKey();
-          ContentId expected = expectedContentIdByKey.get(key);
-          Preconditions.checkState(null != expected, String.format("Null expected content-id for key '%s'", key));
-          throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
-            expected, existing, key));
-        }
+
+          if (expectedContentIdByKey.containsKey(key)) {
+            ContentId expected = expectedContentIdByKey.get(key);
+
+            if (null == expected && null != actual) {
+              // throw exception: something exists at this key
+              throw new IllegalArgumentException(String.format("Conflict when putting new data: found existing actual content-id '%s' for key '%s'",
+                actual, key));
+            } else if (!expected.equals(actual)) {
+              // throw exception: what exists at this key doesn't match expectation
+              throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
+                expected, actual, key));
+            }
+          }
+        });
+
+//        // TODO consider logging additional conflicts, if present, or perhaps adding a count of suppressed conflicts
+//        Optional<KeyListEntry> conflictEntry = allEntries.findFirst();
+//        if (conflictEntry.isPresent()) {
+//          KeyListEntry kle = conflictEntry.get();
+//          ContentId existing = kle.getContentId();
+//          Key key = kle.getKey();
+//          ContentId expected = expectedContentIdByKey.get(key);
+//          Preconditions.checkState(null != expected, String.format("Null expected content-id for key '%s'", key));
+//          throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
+//            expected, existing, key));
+//        }
 
         return null;
       };

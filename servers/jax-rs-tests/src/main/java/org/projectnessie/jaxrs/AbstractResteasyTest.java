@@ -146,7 +146,8 @@ public abstract class AbstractResteasyTest {
     updates[10] =
         ImmutablePut.builder()
             .key(ContentKey.of("xxx", "test"))
-            .content(IcebergTable.of("/the/directory/over/there/has/been/moved", 42, 42, 42, 42))
+            .content(IcebergTable.of("/the/directory/over/there/has/been/moved", 42, 42, 42, 42, table.getId()))
+            .expectedContent(table)
             .build();
 
     Reference branch = rest().get("trees/tree/test").as(Reference.class);
@@ -179,7 +180,7 @@ public abstract class AbstractResteasyTest {
 
     Response res =
         rest().queryParam("ref", "test").get("contents/xxx.test").then().extract().response();
-    Assertions.assertEquals(updates[10].getContent(), withoutId(res.body().as(Content.class)));
+    Assertions.assertEquals(updates[10].getContent(), res.body().as(Content.class));
 
     IcebergTable currentTable = table;
     table =

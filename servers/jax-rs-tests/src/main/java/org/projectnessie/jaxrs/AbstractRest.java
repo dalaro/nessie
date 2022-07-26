@@ -21,7 +21,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.common.collect.ImmutableMap;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Locale;
+import java.util.Map;
 import javax.annotation.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +36,7 @@ import org.projectnessie.error.NessieConflictException;
 import org.projectnessie.error.NessieNotFoundException;
 import org.projectnessie.model.Branch;
 import org.projectnessie.model.CommitMeta;
+import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.Detached;
 import org.projectnessie.model.IcebergTable;
@@ -113,10 +116,19 @@ public abstract class AbstractRest {
   protected String createCommits(
       Reference branch, int numAuthors, int commitsPerAuthor, String currentHash)
       throws BaseNessieClientServerException {
+
+    IcebergTable[] expectedMetas = new IcebergTable[commitsPerAuthor];
     for (int j = 0; j < numAuthors; j++) {
       String author = "author-" + j;
       for (int i = 0; i < commitsPerAuthor; i++) {
-        IcebergTable meta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
+        ContentKey tableKey = ContentKey.of("table" + i);
+        final IcebergTable meta;
+        if (null != expectedMetas[i]) {
+          meta = expectedMetas[i];
+        } else {
+          meta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
+        }
+        System.out.println("author=" + j + " commit=" + i);
         String nextHash =
             getApi()
                 .commitMultipleOperations()
@@ -128,10 +140,17 @@ public abstract class AbstractRest {
                         .message("committed-by-" + author)
                         .properties(ImmutableMap.of("prop1", "val1", "prop2", "val2"))
                         .build())
-                .operation(Put.of(ContentKey.of("table" + i), meta))
+                .operation(Put.of(tableKey, meta, expectedMetas[i]))
                 .commit()
                 .getHash();
         assertThat(currentHash).isNotEqualTo(nextHash);
+        if (null == expectedMetas[i]) {
+          Map<ContentKey, Content> contentMap = getApi().getContent().refName(branch.getName()).key(tableKey).get();
+          expectedMetas[i] = IcebergTable.builder().from(meta).id(contentMap.get(tableKey).getId()).build();
+        } else {
+          String contentId = expectedMetas[i].getId();
+          expectedMetas[i] = IcebergTable.builder().from(meta).id(contentId).build();
+        }
         currentHash = nextHash;
       }
     }
