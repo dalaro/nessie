@@ -124,6 +124,9 @@ public interface DatabaseAdapter {
   Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter)
       throws ReferenceNotFoundException;
 
+  Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> keys)
+      throws ReferenceNotFoundException;
+
   /**
    * Commit operation, see {@link CommitParams} for a description of the parameters.
    *

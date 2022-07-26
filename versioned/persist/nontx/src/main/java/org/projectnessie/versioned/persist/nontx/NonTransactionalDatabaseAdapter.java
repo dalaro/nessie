@@ -212,6 +212,12 @@ public abstract class NonTransactionalDatabaseAdapter<
   }
 
   @Override
+  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> keys)
+      throws ReferenceNotFoundException {
+    return keysForCommitEntry(NON_TRANSACTIONAL_OPERATION_CONTEXT, commit, keyFilter, keys);
+  }
+
+  @Override
   public MergeResult<CommitLogEntry> merge(MergeParams mergeParams)
       throws ReferenceNotFoundException, ReferenceConflictException {
     // The spec for 'VersionStore.merge' mentions "(...) until we arrive at a common ancestor",

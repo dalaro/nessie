@@ -116,6 +116,15 @@ public final class TracingDatabaseAdapter implements DatabaseAdapter {
     }
   }
 
+
+  @Override
+  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> keys)
+      throws ReferenceNotFoundException {
+    try (Traced ignore = trace("keys.stream").tag(TAG_HASH, commit.asString())) {
+      return delegate.keys(commit, keyFilter, keys);
+    }
+  }
+
   @Override
   public Hash commit(CommitParams commitParams)
       throws ReferenceConflictException, ReferenceNotFoundException {

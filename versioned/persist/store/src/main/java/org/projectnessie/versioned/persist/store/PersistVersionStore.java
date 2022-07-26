@@ -185,7 +185,7 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
      */
     if (expectedHead.isPresent()) {
       Callable<Void> putExpectationsValidator = () -> {
-        Stream<KeyListEntry> allEntries = databaseAdapter.keys(expectedHead.get(), KeyFilterPredicate.ALLOW_ALL);
+        Stream<KeyListEntry> allEntries = databaseAdapter.keys(expectedHead.get(), KeyFilterPredicate.ALLOW_ALL, expectedContentIdByKey.keySet());
 
         allEntries.forEach( kle -> {
           ContentId actual = kle.getContentId();
