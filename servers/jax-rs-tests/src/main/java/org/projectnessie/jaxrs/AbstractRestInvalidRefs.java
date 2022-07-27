@@ -175,12 +175,7 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
             String.format(
                 "Could not find commit '%s' in reference '%s'.", invalidHash, branch.getName()));
   }
-
-//  public static Stream<Arguments> invalidPutViaAPI() {
-//    Function<String, Content> f = s -> getIcebergTable(s);
-//    return Stream.of(Arguments.of(f));
-//  }
-
+  
   /**
    * @see AbstractRestInvalidWithHttp#invalidPutViaHTTP(Content.Type)
    */
@@ -188,16 +183,16 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
   @EnumSource(value = Content.Type.class, mode = EnumSource.Mode.EXCLUDE, names = {"UNKNOWN", "NAMESPACE"})
   public void invalidPutViaAPI(Content.Type contentType) throws BaseNessieClientServerException {
     final String branchName = "invalidPutViaAPI";
-    final Branch branch = createBranch(branchName);
     final ContentKey contentKey = ContentKey.of("foo");
     final String fakeId = "bar";
+    Branch branch = createBranch(branchName);
 
     // Specifying expected/existing content when creating new content should fail
     assertThatThrownBy(
             () ->
                 getApi()
                     .commitMultipleOperations()
-                    .branch(branch)
+                    .branch(getBranch(branchName))
                     .operation(Put.of(contentKey, makeContentWithId(contentType, null), makeContentWithId(contentType,null)))
                     .commitMeta(CommitMeta.fromMessage("failed initial put"))
                     .commit())
@@ -233,19 +228,20 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
 
     Put putWithMatchingContentIds =
         Put.of(
-            contentKey, makeContentWithId(contentType,assignedContentId), makeContentWithId(contentType,assignedContentId));
+            contentKey, makeContentWithId(contentType, assignedContentId), makeContentWithId(contentType, assignedContentId));
 
     // Attempt to overwrite content as if it was still new, which should fail now
     assertThatThrownBy(
       () ->
     getApi()
       .commitMultipleOperations()
-      .branch(branch)
+      .branch(getBranch(branchName))
       .operation(Put.of(contentKey, makeContentWithId(contentType,null)))
       .commitMeta(CommitMeta.fromMessage("should fail"))
       .commit())
       .hasMessageStartingWith(
-        "Key '%s' has conflicting put-operation from commit", contentKey.toPathString());
+        "Bad Request (HTTP/400): Existing content found with content-id '%s' for key '%s'",
+        assignedContentId, contentKey.toPathString());
 
     // Overwrite content, specifying matching content IDs on expected and new content
     getApi()
@@ -257,7 +253,7 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
 
     // Attempt overwrite, but specify a bogus content ID in the expected content
     Put putWithInvalidExpectedContentId =
-      Put.of(contentKey, makeContentWithId(contentType,assignedContentId), makeContentWithId(contentType,fakeId));
+      Put.of(contentKey, makeContentWithId(contentType, assignedContentId), makeContentWithId(contentType, fakeId));
     assertThatThrownBy(
             () ->
                 getApi()
@@ -266,11 +262,12 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
                     .operation(putWithInvalidExpectedContentId)
                     .commitMeta(CommitMeta.fromMessage("put with invalid expected content id"))
                     .commit())
-        .hasMessageContaining("content differ for key 'foo'");
+        .hasMessage("Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'",
+          assignedContentId, fakeId, contentKey);
 
     // Attempt similar overwrite as immediately above, but specify a bogus content ID on the new content instead
     Put putWithIncorrectNewContentId =
-      Put.of(contentKey, makeContentWithId(contentType,fakeId), makeContentWithId(contentType,assignedContentId));
+      Put.of(contentKey, makeContentWithId(contentType, fakeId), makeContentWithId(contentType, assignedContentId));
     assertThatThrownBy(
       () ->
         getApi()
@@ -279,11 +276,12 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
           .operation(putWithIncorrectNewContentId)
           .commitMeta(CommitMeta.fromMessage("put with incorrect new content id"))
           .commit())
-      .hasMessageContaining("content differ for key 'foo'");
+      .hasMessageContaining("Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'",
+        fakeId, assignedContentId, contentKey);
 
     // Attempt overwrite, specifying new and expected content IDs which match each other, but not existing data
     Put putWithMatchingFakeContentIds =
-        Put.of(contentKey, makeContentWithId(contentType,fakeId), makeContentWithId(contentType,fakeId));
+        Put.of(contentKey, makeContentWithId(contentType, fakeId), makeContentWithId(contentType, fakeId));
     assertThatThrownBy(
       () ->
     getApi()
@@ -292,11 +290,7 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
         .operation(putWithMatchingFakeContentIds)
         .commitMeta(CommitMeta.fromMessage("put with matching fake content ids"))
         .commit())
-      .hasMessageContaining("Conflict between expected content-id '%s' and actual content-id", fakeId);
-  }
-
-  protected static IcebergTable getIcebergTable(String contentId) {
-    return IcebergTable.of("/iceberg/table", 42, 42, 42, 42, contentId);
+      .hasMessageContaining("Expected content-id '%s' conflicts with actual content-id", fakeId);
   }
 
   private static final ImmutableMap<Content.Type, Function<String, Content>> TEST_CONTENT_FACTORIES =

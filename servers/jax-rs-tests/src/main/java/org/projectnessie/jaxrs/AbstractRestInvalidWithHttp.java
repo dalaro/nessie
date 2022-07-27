@@ -561,7 +561,7 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
                             .post(initialPut)))
         .isInstanceOf(NessieBadRequestException.class)
         .hasMessage(
-            "Bad Request (HTTP/400): Conflict when putting new data: found existing actual content-id '%s' for key '%s'",
+            "Bad Request (HTTP/400): Existing content found with content-id '%s' for key '%s'",
           assignedContentId, contentKey);
 
     // Attempt overwrite, but specify a bogus content ID in the expected content
@@ -618,7 +618,8 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
         .queryParam("expectedHash", getHeadHash(branchName))
         .post(putWithMatchingFakeContentIds)))
       .isInstanceOf(NessieBadRequestException.class)
-      .hasMessageContaining("Conflict between expected content-id '%s' and actual content-id", fakeId);
+      .hasMessage("Bad Request (HTTP/400): Expected content-id '%s' conflicts with actual content-id '%s' for key '%s'",
+        fakeId, assignedContentId, contentKey);
   }
 
   void unwrap(Executable exec) throws Throwable {

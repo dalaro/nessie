@@ -196,11 +196,11 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
 
             if (null == expected && null != actual) {
               // throw exception: something exists at this key
-              throw new IllegalArgumentException(String.format("Conflict when putting new data: found existing actual content-id '%s' for key '%s'",
+              throw new IllegalArgumentException(String.format("Existing content found with content-id '%s' for key '%s'",
                 actual, key));
             } else if (!expected.equals(actual)) {
               // throw exception: what exists at this key doesn't match expectation
-              throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
+              throw new IllegalArgumentException(String.format("Expected content-id '%s' conflicts with actual content-id '%s' for key '%s'",
                 expected, actual, key));
             }
           }
