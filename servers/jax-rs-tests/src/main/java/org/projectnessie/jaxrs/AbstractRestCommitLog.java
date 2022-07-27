@@ -32,6 +32,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
@@ -50,6 +52,7 @@ import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.IcebergView;
+import org.projectnessie.model.ImmutableIcebergTable;
 import org.projectnessie.model.LogResponse;
 import org.projectnessie.model.LogResponse.LogEntry;
 import org.projectnessie.model.Operation.Delete;
@@ -415,26 +418,22 @@ public abstract class AbstractRestCommitLog extends AbstractRestAssign {
     String currentHash = branch.getHash();
     List<String> allMessages = new ArrayList<>();
     final ContentKey tableContentKey = ContentKey.of("table");
-    String tableContentId = null;
+    IcebergTable expectedTableMeta = null;
+
+    // Repeatedly (over)write a single key with an IcebergTable, changing the metadataLocation each time
     for (int i = 0; i < commits; i++) {
       String msg = "message-for-" + i;
       allMessages.add(msg);
-      final IcebergTable tableMeta, expectedTableMeta;
-      if (null != tableContentId) {
-        tableMeta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42, tableContentId);
-        expectedTableMeta = IcebergTable.of("some-file-" + (i-1), 42, 42, 42, 42, tableContentId);
-      } else {
-        tableMeta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
-        expectedTableMeta = null;
+
+      ImmutableIcebergTable.Builder itb = IcebergTable.builder()
+        .metadataLocation("some-file-" + i).snapshotId(42).schemaId(42).specId(42).sortOrderId(42);
+
+      if (null != expectedTableMeta) {
+        itb.id(expectedTableMeta.getId());
       }
 
-      final Put putOperation;
-
-      if (null == expectedTableMeta) {
-        putOperation = Put.of(tableContentKey, tableMeta);
-      } else {
-        putOperation = Put.of(tableContentKey, tableMeta, expectedTableMeta);
-      }
+      final IcebergTable nextTableMeta = itb.build();
+      final Put putOperation = Put.of(tableContentKey, nextTableMeta, expectedTableMeta);
 
       String nextHash =
           getApi()
@@ -446,14 +445,19 @@ public abstract class AbstractRestCommitLog extends AbstractRestAssign {
               .commit()
               .getHash();
 
+      // Read the just-written content, overwriting expectedTableMeta
       Map<ContentKey, Content> contentMap = getApi()
         .getContent()
         .refName(branch.getName())
         .key(tableContentKey)
         .get();
 
-      Content tableContent = contentMap.get(tableContentKey);
-      tableContentId = tableContent.getId();
+      assertThat(contentMap).containsOnlyKeys(tableContentKey);
+      expectedTableMeta = contentMap.get(tableContentKey).unwrap(IcebergTable.class).orElseThrow(
+        () -> new NoSuchElementException("Expected content of type IcebergTable, but got " +
+          contentMap.get(tableContentKey))
+      );
+
       assertNotEquals(currentHash, nextHash);
       currentHash = nextHash;
     }
