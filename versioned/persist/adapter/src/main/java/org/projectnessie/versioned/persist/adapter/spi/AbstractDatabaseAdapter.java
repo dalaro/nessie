@@ -1287,8 +1287,9 @@ public abstract class AbstractDatabaseAdapter<
   }
 
   protected Stream<KeyListEntry> keysForCommitEntry(
-    OP_CONTEXT ctx, Hash hash, KeyFilterPredicate keyFilter, Collection<Key> keys) throws ReferenceNotFoundException {
-    return keysForCommitEntry(ctx, hash, keyFilter, h -> null, keys);
+    OP_CONTEXT ctx, Hash hash, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
+    throws ReferenceNotFoundException {
+    return keysForCommitEntry(ctx, hash, keyFilter, h -> null, whitelist);
   }
 
   /** Retrieve the content-keys and their types for the commit-log-entry with the given hash. */
@@ -1307,18 +1308,12 @@ public abstract class AbstractDatabaseAdapter<
     Hash hash,
     KeyFilterPredicate keyFilter,
     @Nonnull Function<Hash, CommitLogEntry> inMemoryCommits,
-    @Nullable Collection<Key> keys)
+    @Nullable Collection<Key> whitelist)
       throws ReferenceNotFoundException {
     // walk the commit-logs in reverse order - starting with the last persisted key-list
 
     Set<Key> seen = new HashSet<>();
-    final Set<Key> remainingKeys;
-
-    if (null == keys) {
-      remainingKeys = null;
-    } else {
-      remainingKeys =  new HashSet<>(keys);
-    }
+    final Set<Key> remainingKeys = null == whitelist ? null : new HashSet<>(whitelist);
 
     Predicate<KeyListEntry> predicate =
         keyListEntry -> {

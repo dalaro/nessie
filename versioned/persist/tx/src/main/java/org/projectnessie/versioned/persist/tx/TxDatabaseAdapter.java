@@ -241,11 +241,12 @@ public abstract class TxDatabaseAdapter
 
 
   @Override
-  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> keys) throws ReferenceNotFoundException {
+  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
+    throws ReferenceNotFoundException {
     ConnectionWrapper conn = borrowConnection();
     boolean failed = true;
     try {
-      Stream<KeyListEntry> r = keysForCommitEntry(conn, commit, keyFilter, keys);
+      Stream<KeyListEntry> r = keysForCommitEntry(conn, commit, keyFilter, whitelist);
       failed = false;
       return r.onClose(conn::close);
     } finally {

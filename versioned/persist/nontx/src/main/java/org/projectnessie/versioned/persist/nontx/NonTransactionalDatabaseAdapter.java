@@ -212,9 +212,9 @@ public abstract class NonTransactionalDatabaseAdapter<
   }
 
   @Override
-  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> keys)
+  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
       throws ReferenceNotFoundException {
-    return keysForCommitEntry(NON_TRANSACTIONAL_OPERATION_CONTEXT, commit, keyFilter, keys);
+    return keysForCommitEntry(NON_TRANSACTIONAL_OPERATION_CONTEXT, commit, keyFilter, whitelist);
   }
 
   @Override
