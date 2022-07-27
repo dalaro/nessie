@@ -22,10 +22,10 @@ import static org.projectnessie.model.Validation.HASH_MESSAGE;
 import static org.projectnessie.model.Validation.REF_NAME_MESSAGE;
 
 import org.assertj.core.api.Assumptions;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.projectnessie.client.http.HttpClientException;
 import org.projectnessie.error.BaseNessieClientServerException;
 import org.projectnessie.error.NessieBadRequestException;
@@ -35,7 +35,6 @@ import org.projectnessie.model.Branch;
 import org.projectnessie.model.CommitMeta;
 import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.ImmutableOperations;
 import org.projectnessie.model.Operation;
 import org.projectnessie.model.Operations;
@@ -468,10 +467,10 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
                         + "`org.projectnessie.model.Reference`: known type ids = ["));
   }
 
-  private static Operations getPutTableOpSingleton(
-      String newContentId, String expectedContentId, ContentKey contentKey, String commitMessage) {
-    IcebergTable newTable = getIcebergTable(newContentId);
-    IcebergTable expectedTable = getIcebergTable(expectedContentId);
+  private static Operations getPutOpSingleton(
+      Content.Type type, String newContentId, String expectedContentId, ContentKey contentKey, String commitMessage) {
+    Content newTable = makeContentWithId(type, newContentId);
+    Content expectedTable = makeContentWithId(type, expectedContentId);
     final Operation.Put op = Operation.Put.of(contentKey, newTable, expectedTable);
     return ImmutableOperations.builder()
         .addOperations(op)
@@ -479,9 +478,9 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
         .build();
   }
 
-  private static Operations getPutTableOpSingleton(
-      String newContentId, ContentKey contentKey, String commitMessage) {
-    IcebergTable newTable = getIcebergTable(newContentId);
+  private static Operations getPutOpSingleton(
+      Content.Type type, String newContentId, ContentKey contentKey, String commitMessage) {
+    Content newTable = makeContentWithId(type, newContentId);
     final Operation.Put op = Operation.Put.of(contentKey, newTable);
     return ImmutableOperations.builder()
         .addOperations(op)
@@ -502,16 +501,19 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
   }
 
   /**
-   * @see AbstractRestInvalidRefs#invalidPutViaAPI()
+   * @see AbstractRestInvalidRefs#invalidPutViaAPI(Content.Type)
    */
-  @Test
-  public void invalidPutViaHttp() throws BaseNessieClientServerException {
-    final String branchName = "invalidPutViaHttp";
+  @ParameterizedTest(name = "invalidPutViaHTTP [{index}] {arguments}")
+  @EnumSource(value = Content.Type.class, mode = EnumSource.Mode.EXCLUDE, names = {"UNKNOWN", "NAMESPACE"})
+  public void invalidPutViaHTTP(Content.Type type) throws BaseNessieClientServerException {
+    final String branchName = "invalidPutViaHTTP";
     final Branch branch = createBranch(branchName);
     final ContentKey contentKey = ContentKey.of("foo");
+    final String fakeId = "bar";
 
+    // Specifying expected/existing content when creating new content should fail
     Operations initialPutWithInvalidExpectedContent =
-        getPutTableOpSingleton(null, null, contentKey, "initial put");
+        getPutOpSingleton(type, null, null, contentKey, "failed initial put");
     assertThatThrownBy(
             () ->
                 unwrap(
@@ -526,13 +528,16 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
         .hasMessageStartingWith(
             "Bad Request (HTTP/400): Expected content must not be set when creating new content");
 
-    Operations initialPut = getPutTableOpSingleton(null, contentKey, "initial put");
+    // Contrasting previous intentional failure, create content successfully
+    Operations initialPut = getPutOpSingleton(type, null, contentKey, "initial put");
     getHttpClient()
         .newRequest()
         .path("trees/branch/{branchName}/commit")
         .resolveTemplate("branchName", branch.getName())
         .queryParam("expectedHash", getHeadHash(branchName))
         .post(initialPut);
+
+    // Read the content we created and record the content ID
     Content cont =
         getHttpClient()
             .newRequest()
@@ -543,9 +548,7 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
             .readEntity(Content.class);
     String assignedContentId = cont.getId();
 
-    Operations putWithNullExpectedContentId =
-        getPutTableOpSingleton(
-            assignedContentId, null, contentKey, "putting with null expected content id");
+    // Attempt to overwrite content as if it was still new, which should fail now
     assertThatThrownBy(
             () ->
                 unwrap(
@@ -555,14 +558,16 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
                             .path("trees/branch/{branchName}/commit")
                             .resolveTemplate("branchName", branchName)
                             .queryParam("expectedHash", getHeadHash(branchName))
-                            .post(putWithNullExpectedContentId)))
+                            .post(initialPut)))
         .isInstanceOf(NessieBadRequestException.class)
-        .hasMessageStartingWith(
-            "Bad Request (HTTP/400): Content id for expected content must not be null, key");
+        .hasMessage(
+            "Bad Request (HTTP/400): Conflict when putting new data: found existing actual content-id '%s' for key '%s'",
+          assignedContentId, contentKey);
 
+    // Attempt overwrite, but specify a bogus content ID in the expected content
     Operations putWithIncorrectExpectedContentId =
-        getPutTableOpSingleton(
-            assignedContentId, "foobar", contentKey, "put with invalid expected content id");
+        getPutOpSingleton(
+            type, assignedContentId, fakeId, contentKey, "put with invalid expected content id");
     assertThatThrownBy(
             () ->
                 unwrap(
@@ -574,11 +579,14 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
                             .queryParam("expectedHash", getHeadHash(branchName))
                             .post(putWithIncorrectExpectedContentId)))
         .isInstanceOf(NessieBadRequestException.class)
-        .hasMessageContaining("content differ for key 'foo'");
+      .hasMessage(
+        "Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'",
+        assignedContentId, fakeId, contentKey.toPathString());
 
+    // Attempt similar overwrite as immediately above, but specify a bogus content ID on the new content instead
     Operations putWithIncorrectNewContentId =
-        getPutTableOpSingleton(
-            "foobaz", assignedContentId, contentKey, "put with incorrect new content id");
+        getPutOpSingleton(
+            type, fakeId, assignedContentId, contentKey, "put with incorrect new content id");
     assertThatThrownBy(
             () ->
                 unwrap(
@@ -592,17 +600,12 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
         .isInstanceOf(NessieBadRequestException.class)
         .hasMessage(
             "Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'",
-            "foobaz", assignedContentId, contentKey.toPathString());
+            fakeId, assignedContentId, contentKey.toPathString());
 
-    /*
-     * Creates an Operations singleton.  The sole element is a Put.
-     * The expected and to-be-written content IDs are both "fake id".
-     * This intentionally mismatches the server-assigned UUID of the existing content at this key.
-     */
-    String fakeId = "fake id";
+    // Attempt overwrite, specifying new and expected content IDs which match each other, but not existing data
     Operations putWithMatchingFakeContentIds =
-        getPutTableOpSingleton(
-            fakeId, fakeId, contentKey, "put with matching fake content ids");
+        getPutOpSingleton(
+            type, fakeId, fakeId, contentKey, "put with matching fake content ids");
     assertThatThrownBy(
       () ->
         unwrap(

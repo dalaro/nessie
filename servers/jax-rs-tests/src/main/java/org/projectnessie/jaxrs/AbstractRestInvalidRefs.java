@@ -18,15 +18,23 @@ package org.projectnessie.jaxrs;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.projectnessie.model.Validation.REF_NAME_MESSAGE;
 
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.projectnessie.error.BaseNessieClientServerException;
 import org.projectnessie.error.NessieBadRequestException;
 import org.projectnessie.error.NessieNotFoundException;
@@ -34,10 +42,16 @@ import org.projectnessie.model.Branch;
 import org.projectnessie.model.CommitMeta;
 import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
+import org.projectnessie.model.DeltaLakeTable;
 import org.projectnessie.model.EntriesResponse;
 import org.projectnessie.model.IcebergTable;
+import org.projectnessie.model.ImmutableDeltaLakeTable;
+import org.projectnessie.model.ImmutableIcebergTable;
+import org.projectnessie.model.ImmutableIcebergView;
+import org.projectnessie.model.ImmutableNamespace;
 import org.projectnessie.model.LogResponse;
 import org.projectnessie.model.Operation;
+import org.projectnessie.model.Operation.Put;
 import org.projectnessie.model.Reference;
 
 /** See {@link AbstractTestRest} for details about and reason for the inheritance model. */
@@ -162,50 +176,78 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
                 "Could not find commit '%s' in reference '%s'.", invalidHash, branch.getName()));
   }
 
-  /**
-   * @see AbstractRestInvalidWithHttp#invalidPutViaHttp()
-   */
-  @Test
-  public void invalidPutViaAPI() throws BaseNessieClientServerException {
-    final String branchName = "invalidPutViaAPI";
-    Branch branch = createBranch(branchName);
-    ContentKey contentKey = ContentKey.of("foo");
+//  public static Stream<Arguments> invalidPutViaAPI() {
+//    Function<String, Content> f = s -> getIcebergTable(s);
+//    return Stream.of(Arguments.of(f));
+//  }
 
-    Operation.Put putWithExpected =
-        Operation.Put.of(contentKey, getIcebergTable(null), getIcebergTable(null));
-    // 1) every Put operation for a new content key must have an empty/no expectedContent
+  /**
+   * @see AbstractRestInvalidWithHttp#invalidPutViaHTTP(Content.Type)
+   */
+  @ParameterizedTest(name = "invalidPutViaAPI [{index}] {arguments}")
+  @EnumSource(value = Content.Type.class, mode = EnumSource.Mode.EXCLUDE, names = {"UNKNOWN", "NAMESPACE"})
+  public void invalidPutViaAPI(Content.Type contentType) throws BaseNessieClientServerException {
+    final String branchName = "invalidPutViaAPI";
+    final Branch branch = createBranch(branchName);
+    final ContentKey contentKey = ContentKey.of("foo");
+    final String fakeId = "bar";
+
+    // Specifying expected/existing content when creating new content should fail
     assertThatThrownBy(
             () ->
                 getApi()
                     .commitMultipleOperations()
                     .branch(branch)
-                    .operation(putWithExpected)
+                    .operation(Put.of(contentKey, makeContentWithId(contentType, null), makeContentWithId(contentType,null)))
                     .commitMeta(CommitMeta.fromMessage("failed initial put"))
                     .commit())
         .hasMessageStartingWith(
             "Bad Request (HTTP/400): Expected content must not be set when creating new content");
 
-    Operation.Put putWithoutExpected = Operation.Put.of(contentKey, getIcebergTable(null));
+    // TODO either (a) delete or (b) uncomment and correct the message assertion, pending discussion
+    // Specifying a non-null content ID when creating new content should fail
+//    assertThatThrownBy(
+//      () ->
+//        getApi()
+//          .commitMultipleOperations()
+//          .branch(branch)
+//          .operation(Put.of(contentKey, getIcebergTable("bar")))
+//          .commitMeta(CommitMeta.fromMessage("failed initial put"))
+//          .commit())
+//      .hasMessageStartingWith(
+//        "Bad Request (HTTP/400): TODO write exception message");
+
+    // Contrasting previous intentional failure, create content successfully
     getApi()
         .commitMultipleOperations()
         .branch(branch)
-        .operation(putWithoutExpected)
+        .operation(Put.of(contentKey, makeContentWithId(contentType,null)))
         .commitMeta(CommitMeta.fromMessage("successful initial put"))
         .commit();
 
+    // Read the content we created and record the content ID
     Map<ContentKey, Content> contents =
         getApi().getContent().key(contentKey).refName(branch.getName()).get();
-    // TODO rely on AbstractMapAssert via assertj statics instead
-    assertNotNull(contents);
-    assertEquals(1, contents.size());
-    Map.Entry<ContentKey, Content> ent = contents.entrySet().iterator().next();
-    String assignedContentId = ent.getValue().getId();
+    assertThat(contents).isNotNull().hasSize(1).containsOnlyKeys(contentKey);
+    String assignedContentId = Iterables.getOnlyElement(contents.values()).getId();
 
-    Operation.Put putWithMatchingContentIds =
-        Operation.Put.of(
-            contentKey, getIcebergTable(assignedContentId), getIcebergTable(assignedContentId));
+    Put putWithMatchingContentIds =
+        Put.of(
+            contentKey, makeContentWithId(contentType,assignedContentId), makeContentWithId(contentType,assignedContentId));
 
-    // 2) every Put operation for an existing content key must have a non-empty expectedContent
+    // Attempt to overwrite content as if it was still new, which should fail now
+    assertThatThrownBy(
+      () ->
+    getApi()
+      .commitMultipleOperations()
+      .branch(branch)
+      .operation(Put.of(contentKey, makeContentWithId(contentType,null)))
+      .commitMeta(CommitMeta.fromMessage("should fail"))
+      .commit())
+      .hasMessageStartingWith(
+        "Key '%s' has conflicting put-operation from commit", contentKey.toPathString());
+
+    // Overwrite content, specifying matching content IDs on expected and new content
     getApi()
         .commitMultipleOperations()
         .branch(getBranch(branchName))
@@ -213,12 +255,9 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
         .commitMeta(CommitMeta.fromMessage("successful overwrite put"))
         .commit();
 
-    Operation.Put putWithInvalidExpectedContentId =
-        Operation.Put.of(contentKey, getIcebergTable(assignedContentId), getIcebergTable("foobar"));
-    // 3) verify that the content id of the content in a Put operation is equal to the content id of
-    // a non-empty expectedContent
-    // (for an existing ref, request-supplied expected contentid == existing contentid =?
-    // request-supplied to-write contentid)
+    // Attempt overwrite, but specify a bogus content ID in the expected content
+    Put putWithInvalidExpectedContentId =
+      Put.of(contentKey, makeContentWithId(contentType,assignedContentId), makeContentWithId(contentType,fakeId));
     assertThatThrownBy(
             () ->
                 getApi()
@@ -229,9 +268,22 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
                     .commit())
         .hasMessageContaining("content differ for key 'foo'");
 
-    String fakeId = "foobar";
-    Operation.Put putWithMatchingFakeContentIds =
-        Operation.Put.of(contentKey, getIcebergTable(fakeId), getIcebergTable(fakeId));
+    // Attempt similar overwrite as immediately above, but specify a bogus content ID on the new content instead
+    Put putWithIncorrectNewContentId =
+      Put.of(contentKey, makeContentWithId(contentType,fakeId), makeContentWithId(contentType,assignedContentId));
+    assertThatThrownBy(
+      () ->
+        getApi()
+          .commitMultipleOperations()
+          .branch(getBranch(branchName))
+          .operation(putWithIncorrectNewContentId)
+          .commitMeta(CommitMeta.fromMessage("put with incorrect new content id"))
+          .commit())
+      .hasMessageContaining("content differ for key 'foo'");
+
+    // Attempt overwrite, specifying new and expected content IDs which match each other, but not existing data
+    Put putWithMatchingFakeContentIds =
+        Put.of(contentKey, makeContentWithId(contentType,fakeId), makeContentWithId(contentType,fakeId));
     assertThatThrownBy(
       () ->
     getApi()
@@ -241,22 +293,31 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
         .commitMeta(CommitMeta.fromMessage("put with matching fake content ids"))
         .commit())
       .hasMessageContaining("Conflict between expected content-id '%s' and actual content-id", fakeId);
-
-    Operation.Put putWithIncorrectNewContentId =
-        Operation.Put.of(contentKey, getIcebergTable("foobar"), getIcebergTable(assignedContentId));
-    assertThatThrownBy(
-            () ->
-                getApi()
-                    .commitMultipleOperations()
-                    .branch(getBranch(branchName))
-                    .operation(putWithIncorrectNewContentId)
-                    .commitMeta(CommitMeta.fromMessage("put with incorrect new content id"))
-                    .commit())
-        .hasMessageContaining("content differ for key 'foo'");
   }
 
   protected static IcebergTable getIcebergTable(String contentId) {
     return IcebergTable.of("/iceberg/table", 42, 42, 42, 42, contentId);
+  }
+
+  private static final ImmutableMap<Content.Type, Function<String, Content>> TEST_CONTENT_FACTORIES =
+    ImmutableMap.of(
+      Content.Type.DELTA_LAKE_TABLE, id ->
+        ImmutableDeltaLakeTable.builder().id(id)
+          .addMetadataLocationHistory("/delta/metadata")
+          .addCheckpointLocationHistory("/delta/checkpoint")
+          .build(),
+      Content.Type.ICEBERG_TABLE, id ->
+        ImmutableIcebergTable.of("/iceberg/table", 42, 42, 42, 42, id),
+      Content.Type.ICEBERG_VIEW, id ->
+        ImmutableIcebergView.of(id, "/iceberg/view", 42, 42, "dialect", "statement")
+    );
+
+  protected static Content makeContentWithId(final Content.Type type, final String id) {
+    Function<String, Content> factory = TEST_CONTENT_FACTORIES.get(type);
+    if (null == factory) {
+      throw new IllegalArgumentException("Unsupported content type: " + type);
+    }
+    return factory.apply(id);
   }
 
   private Branch getBranch(final String branchName) throws NessieNotFoundException {
