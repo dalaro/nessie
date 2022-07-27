@@ -122,13 +122,13 @@ public abstract class AbstractRest {
       String author = "author-" + j;
       for (int i = 0; i < commitsPerAuthor; i++) {
         ContentKey tableKey = ContentKey.of("table" + i);
-        final IcebergTable meta;
-        if (null != expectedMetas[i]) {
-          meta = expectedMetas[i];
-        } else {
-          meta = IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
-        }
-        System.out.println("author=" + j + " commit=" + i);
+
+        // If a previous author already wrote this key, then prepare to overwrite with the exact same content
+        // If desired, we could change the table metadata, but we'd still need something like this for content IDs
+        final IcebergTable meta = null != expectedMetas[i] ?
+          expectedMetas[i] :
+          IcebergTable.of("some-file-" + i, 42, 42, 42, 42);
+
         String nextHash =
             getApi()
                 .commitMultipleOperations()
@@ -145,11 +145,10 @@ public abstract class AbstractRest {
                 .getHash();
         assertThat(currentHash).isNotEqualTo(nextHash);
         if (null == expectedMetas[i]) {
+          // We just wrote this key for the first time (i.e. it was new content)
+          // Retrieve the server-assigned content ID and store it in expectedMetas
           Map<ContentKey, Content> contentMap = getApi().getContent().refName(branch.getName()).key(tableKey).get();
           expectedMetas[i] = IcebergTable.builder().from(meta).id(contentMap.get(tableKey).getId()).build();
-        } else {
-          String contentId = expectedMetas[i].getId();
-          expectedMetas[i] = IcebergTable.builder().from(meta).id(contentId).build();
         }
         currentHash = nextHash;
       }
