@@ -16,6 +16,8 @@
 package org.projectnessie.client.http.v1api;
 
 import java.util.List;
+
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.client.api.CommitMultipleOperationsBuilder;
 import org.projectnessie.client.http.NessieApiClient;
 import org.projectnessie.error.NessieConflictException;
@@ -30,6 +32,8 @@ final class HttpCommitMultipleOperations
     implements CommitMultipleOperationsBuilder {
 
   private final ImmutableOperations.Builder operations = ImmutableOperations.builder();
+
+  private ConflictOption conflictMode;
 
   HttpCommitMultipleOperations(NessieApiClient client) {
     super(client);
@@ -54,7 +58,13 @@ final class HttpCommitMultipleOperations
   }
 
   @Override
+  public CommitMultipleOperationsBuilder conflictMode(ConflictOption conflictMode) {
+    this.conflictMode = conflictMode;
+    return this;
+  }
+
+  @Override
   public Branch commit() throws NessieNotFoundException, NessieConflictException {
-    return client.getTreeApi().commitMultipleOperations(branchName, hash, operations.build());
+    return client.getTreeApi().commitMultipleOperations(branchName, hash, conflictMode, operations.build());
   }
 }

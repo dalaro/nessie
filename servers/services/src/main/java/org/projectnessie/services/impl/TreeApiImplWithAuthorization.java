@@ -26,7 +26,11 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
+
 import org.projectnessie.api.params.CommitLogParams;
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.api.params.GetReferenceParams;
 import org.projectnessie.api.params.ReferencesParams;
 import org.projectnessie.error.NessieConflictException;
@@ -260,7 +264,7 @@ public class TreeApiImplWithAuthorization extends TreeApiImpl {
   }
 
   @Override
-  public Branch commitMultipleOperations(String branch, String expectedHash, Operations operations)
+  public Branch commitMultipleOperations(String branch, String expectedHash, ConflictOption conflictOption, Operations operations)
       throws NessieNotFoundException, NessieConflictException {
     BranchName branchName = BranchName.of(branch);
     BatchAccessChecker check = startAccessCheck().canCommitChangeAgainstReference(branchName);
@@ -280,6 +284,6 @@ public class TreeApiImplWithAuthorization extends TreeApiImpl {
               }
             });
     check.checkAndThrow();
-    return super.commitMultipleOperations(branch, expectedHash, operations);
+    return super.commitMultipleOperations(branch, expectedHash, conflictOption, operations);
   }
 }

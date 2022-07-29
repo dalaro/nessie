@@ -83,12 +83,23 @@ public interface VersionStore<VALUE, METADATA, VALUE_TYPE extends Enum<VALUE_TYP
    * @throws NullPointerException if one of the argument is {@code null}
    */
   Hash commit(
+    @Nonnull BranchName branch,
+    @Nonnull Optional<Hash> referenceHash,
+    @Nonnull METADATA metadata,
+    Boolean isCautiousContentIdChecks,
+    @Nonnull List<Operation<VALUE>> operations,
+    @Nonnull Callable<Void> validator)
+    throws ReferenceNotFoundException, ReferenceConflictException;
+
+  default Hash commit(
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> referenceHash,
       @Nonnull METADATA metadata,
       @Nonnull List<Operation<VALUE>> operations,
       @Nonnull Callable<Void> validator)
-      throws ReferenceNotFoundException, ReferenceConflictException;
+      throws ReferenceNotFoundException, ReferenceConflictException {
+    return commit(branch, referenceHash, metadata, false, operations, validator);
+  }
 
   default Hash commit(
       @Nonnull BranchName branch,

@@ -175,7 +175,7 @@ public abstract class AbstractRestInvalidRefs extends AbstractRestEntries {
             String.format(
                 "Could not find commit '%s' in reference '%s'.", invalidHash, branch.getName()));
   }
-  
+
   /**
    * @see AbstractRestInvalidWithHttp#invalidPutViaHTTP(Content.Type)
    */

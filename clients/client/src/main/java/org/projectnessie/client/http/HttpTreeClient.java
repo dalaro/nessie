@@ -18,8 +18,11 @@ package org.projectnessie.client.http;
 import java.util.Locale;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
+import javax.ws.rs.DefaultValue;
+
 import org.projectnessie.api.http.HttpTreeApi;
 import org.projectnessie.api.params.CommitLogParams;
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.api.params.EntriesParams;
 import org.projectnessie.api.params.FetchOption;
 import org.projectnessie.api.params.GetReferenceParams;
@@ -181,7 +184,7 @@ class HttpTreeClient implements HttpTreeApi {
 
   @Override
   public Branch commitMultipleOperations(
-      String branch, @NotNull String expectedHash, @NotNull Operations operations)
+    String branch, @NotNull String expectedHash, @NotNull ConflictOption conflictOption, @NotNull Operations operations)
       throws NessieNotFoundException, NessieConflictException {
     return client
         .newRequest()

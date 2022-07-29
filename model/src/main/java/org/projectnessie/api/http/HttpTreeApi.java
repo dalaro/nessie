@@ -15,9 +15,12 @@
  */
 package org.projectnessie.api.http;
 
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
 import javax.ws.rs.BeanParam;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
@@ -36,6 +39,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
 import org.projectnessie.api.TreeApi;
 import org.projectnessie.api.params.CommitLogParams;
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.api.params.EntriesParams;
 import org.projectnessie.api.params.GetReferenceParams;
 import org.projectnessie.api.params.ReferencesParams;
@@ -489,17 +493,22 @@ public interface HttpTreeApi extends TreeApi {
     @APIResponse(responseCode = "409", description = "Update conflict")
   })
   Branch commitMultipleOperations(
-      @Parameter(
+    @Parameter(
               description = "Branch to change, defaults to default branch.",
               examples = {@ExampleObject(ref = "ref")})
           @PathParam("branchName")
           String branchName,
-      @Parameter(
+    @Parameter(
               description = "Expected hash of branch.",
               examples = {@ExampleObject(ref = "hash")})
           @QueryParam("expectedHash")
           String expectedHash,
-      @RequestBody(
+    @Parameter(
+              description = "How to check for potential conflicts." /* TODO examples */)
+          @QueryParam("conflictMode")
+          @DefaultValue("CAUTIOUS")
+          ConflictOption conflictOption,
+    @RequestBody(
               description = "Operations",
               content =
                   @Content(

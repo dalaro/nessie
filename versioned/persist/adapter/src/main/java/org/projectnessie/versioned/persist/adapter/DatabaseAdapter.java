@@ -360,4 +360,6 @@ public interface DatabaseAdapter {
 
   @VisibleForTesting
   void assertCleanStateForTests();
+
+  DatabaseAdapterConfig getConfig();
 }

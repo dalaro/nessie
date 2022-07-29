@@ -49,8 +49,12 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
+
 import org.projectnessie.api.TreeApi;
 import org.projectnessie.api.params.CommitLogParams;
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.api.params.EntriesParams;
 import org.projectnessie.api.params.FetchOption;
 import org.projectnessie.api.params.GetReferenceParams;
@@ -645,7 +649,7 @@ public class TreeApiImpl extends BaseApiImpl implements TreeApi {
   }
 
   @Override
-  public Branch commitMultipleOperations(String branch, String expectedHash, Operations operations)
+  public Branch commitMultipleOperations(String branch, String expectedHash, ConflictOption conflictOption, Operations operations)
       throws NessieNotFoundException, NessieConflictException {
     List<org.projectnessie.versioned.Operation<Content>> ops =
         operations.getOperations().stream()
@@ -665,7 +669,9 @@ public class TreeApiImpl extends BaseApiImpl implements TreeApi {
                   BranchName.of(Optional.ofNullable(branch).orElse(getConfig().getDefaultBranch())),
                   Optional.ofNullable(expectedHash).map(Hash::of),
                   commitMetaUpdate().rewriteSingle(commitMeta),
-                  ops);
+                  null == conflictOption ? null : ConflictOption.isCautious(conflictOption),
+                  ops,
+                  () -> null);
 
       return Branch.of(branch, newHash.asString());
     } catch (ReferenceNotFoundException e) {

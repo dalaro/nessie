@@ -78,11 +78,13 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
 
   private final DatabaseAdapter databaseAdapter;
   protected final StoreWorker<CONTENT, METADATA, CONTENT_TYPE> storeWorker;
+  private final boolean fullContentIdChecks;
 
   public PersistVersionStore(
       DatabaseAdapter databaseAdapter, StoreWorker<CONTENT, METADATA, CONTENT_TYPE> storeWorker) {
     this.databaseAdapter = databaseAdapter;
     this.storeWorker = storeWorker;
+    this.fullContentIdChecks = databaseAdapter.getConfig().getContentIdConflictChecks().equalsIgnoreCase("CAUTIOUS");
   }
 
   @Override
@@ -102,6 +104,7 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> expectedHead,
       @Nonnull METADATA metadata,
+      Boolean isCautiousContentIdChecks,
       @Nonnull List<Operation<CONTENT>> operations,
       @Nonnull Callable<Void> validator)
       throws ReferenceNotFoundException, ReferenceConflictException {
@@ -176,6 +179,10 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
       }
     }
 
+    boolean cautiousChecks =
+      null != isCautiousContentIdChecks ? isCautiousContentIdChecks :
+        "CAUTIOUS".equalsIgnoreCase(databaseAdapter.getConfig().getContentIdConflictChecks());
+
     /*
      * If expectedHead is present, then attempt to detect conflicts between:
      *
@@ -183,7 +190,7 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
      *
      * b) actual content-ids present at the HEAD referenced by expectedHash (at the same content-keys)
      */
-    if (expectedHead.isPresent()) {
+    if (cautiousChecks && expectedHead.isPresent()) {
       Callable<Void> putExpectationsValidator = () -> {
         Stream<KeyListEntry> allEntries = databaseAdapter.keys(expectedHead.get(), KeyFilterPredicate.ALLOW_ALL, expectedContentIdByKey.keySet());
 

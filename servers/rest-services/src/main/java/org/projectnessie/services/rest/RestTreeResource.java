@@ -17,11 +17,15 @@ package org.projectnessie.services.rest;
 
 import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
+import javax.ws.rs.DefaultValue;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.SecurityContext;
 import org.projectnessie.api.TreeApi;
 import org.projectnessie.api.http.HttpTreeApi;
 import org.projectnessie.api.params.CommitLogParams;
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.api.params.EntriesParams;
 import org.projectnessie.api.params.GetReferenceParams;
 import org.projectnessie.api.params.ReferencesParams;
@@ -145,8 +149,8 @@ public class RestTreeResource implements HttpTreeApi {
 
   @Override
   public Branch commitMultipleOperations(
-      String branchName, String expectedHash, Operations operations)
+    String branchName, String expectedHash, ConflictOption conflictOption, Operations operations)
       throws NessieNotFoundException, NessieConflictException {
-    return resource().commitMultipleOperations(branchName, expectedHash, operations);
+    return resource().commitMultipleOperations(branchName, expectedHash, conflictOption, operations);
   }
 }

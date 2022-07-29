@@ -93,6 +93,7 @@ public class TracingVersionStore<VALUE, METADATA, VALUE_TYPE extends Enum<VALUE_
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> referenceHash,
       @Nonnull METADATA metadata,
+      Boolean unsafeConflicts,
       @Nonnull List<Operation<VALUE>> operations,
       @Nonnull Callable<Void> validator)
       throws ReferenceNotFoundException, ReferenceConflictException {
@@ -103,7 +104,7 @@ public class TracingVersionStore<VALUE, METADATA, VALUE_TYPE extends Enum<VALUE_
                 b.withTag(TAG_BRANCH, safeRefName(branch))
                     .withTag(TAG_HASH, safeToString(referenceHash))
                     .withTag(TAG_NUM_OPS, safeSize(operations)),
-            () -> delegate.commit(branch, referenceHash, metadata, operations, validator));
+            () -> delegate.commit(branch, referenceHash, metadata, unsafeConflicts, operations, validator));
   }
 
   @Override
