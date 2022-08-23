@@ -31,4 +31,5 @@ dependencies {
   implementation("com.google.protobuf:protobuf-java")
   implementation("com.google.code.findbugs:jsr305")
   implementation("com.google.guava:guava")
+  implementation("org.slf4j:slf4j-api")
 }

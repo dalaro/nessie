@@ -32,6 +32,11 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
+
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.projectnessie.versioned.BranchName;
 import org.projectnessie.versioned.Commit;
 import org.projectnessie.versioned.Delete;
@@ -80,6 +85,8 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
   protected final StoreWorker<CONTENT, METADATA, CONTENT_TYPE> storeWorker;
   private final boolean fullContentIdChecks;
 
+  private static final Logger LOG = LoggerFactory.getLogger(PersistVersionStore.class);
+
   public PersistVersionStore(
       DatabaseAdapter databaseAdapter, StoreWorker<CONTENT, METADATA, CONTENT_TYPE> storeWorker) {
     this.databaseAdapter = databaseAdapter;
@@ -117,6 +124,12 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
             .validator(validator);
 
     Map<Key, ContentId> expectedContentIdByKey = new HashMap<>();
+
+//    LOG.info("Committing to branch={} expectedHead={}", branch, expectedHead);
+
+//    LOG.error("Put to branch: {}", branch.getName());
+//    System.err.println("stderr");
+//    System.out.println("stdout");
 
     for (Operation<CONTENT> operation : operations) {
       if (operation instanceof Put) {
@@ -179,9 +192,10 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
       }
     }
 
-    boolean cautiousChecks =
-      null != isCautiousContentIdChecks ? isCautiousContentIdChecks :
-        "CAUTIOUS".equalsIgnoreCase(databaseAdapter.getConfig().getContentIdConflictChecks());
+    boolean cautiousChecks = false;
+//    boolean cautiousChecks =
+//      null != isCautiousContentIdChecks ? isCautiousContentIdChecks :
+//        "CAUTIOUS".equalsIgnoreCase(databaseAdapter.getConfig().getContentIdConflictChecks());
 
     /*
      * If expectedHead is present, then attempt to detect conflicts between:
@@ -197,9 +211,11 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
         allEntries.forEach( kle -> {
           ContentId actual = kle.getContentId();
           Key key = kle.getKey();
+//          LOG.info("Checking entry Key={} Actual-Content-Id={}", key, actual);
 
           if (expectedContentIdByKey.containsKey(key)) {
             ContentId expected = expectedContentIdByKey.get(key);
+//            LOG.info("Checking Put Key={} Actual-Content-Id={} Expected-Content-Id={}", key, actual, expected);
 
             if (null == expected && null != actual) {
               // throw exception: something exists at this key
@@ -231,6 +247,8 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
       Callable<Void> combinedValidator = () -> { validator.call(); putExpectationsValidator.call(); return null; };
       commitAttempt.validator(combinedValidator);
     }
+
+//    throw new RuntimeException("Put");
 
     return databaseAdapter.commit(commitAttempt.build());
   }

@@ -122,6 +122,8 @@ import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefLogEntry;
 import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefLogEntry.Operation;
 import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefLogParents;
 import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Transactional/relational {@link AbstractDatabaseAdapter} implementation using JDBC primitives.
@@ -136,6 +138,8 @@ public abstract class TxDatabaseAdapter
   protected static final String REF_TYPE_BRANCH = "b";
   /** Value for {@link SqlStatements#TABLE_NAMED_REFERENCES}.{@code ref_type} for a tag. */
   protected static final String REF_TYPE_TAG = "t";
+
+  private static final Logger LOG = LoggerFactory.getLogger(TxDatabaseAdapter.class);
 
   private final TxConnectionProvider<?> db;
 
@@ -1237,7 +1241,10 @@ public abstract class TxDatabaseAdapter
               ps.setString(i++, id.asString());
             }
           },
-          (rs) -> KeyListEntity.of(Hash.of(rs.getString(1)), protoToKeyList(rs.getBytes(2))));
+          (rs) -> {
+            LOG.info("TxDatabaseAdapter: retrieved up to {} keylists", keyListsIds.size());
+            return KeyListEntity.of(Hash.of(rs.getString(1)), protoToKeyList(rs.getBytes(2)));
+          });
     }
   }
 
