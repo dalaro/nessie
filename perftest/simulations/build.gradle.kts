@@ -49,27 +49,16 @@ nessieQuarkusApp {
     jvmArgs(
       listOf(
         "-Dsim.users=10",
-        "-Dnessie.uri=http://127.0.0.1:19120/api/v1",
+        "-Dnessie.uri=http://127.0.0.1:${extra["quarkus.http.test-port"]}/api/v1"
       )
     )
   }
   environmentNonInput.put("HTTP_ACCESS_LOG_LEVEL", testLogLevel())
 }
 
-//tasks.withType<io.quarkus.gradle.tasks.QuarkusBuild>().configureEach {
-//  jvmArgs(
-//        "-Dnessie.version.store.type=TRANSACTIONAL",
-//        "-Dquarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/nessie_bench"
-//  )
-//  systemProperty("-Dnessie.version.store.type", "TRANSACTIONAL")
-//  systemProperty("-Dquarkus.datasource.jdbc.url", "jdbc:postgresql://localhost:5432/nessie_bench")
-//}
-
-
-
 gatling {
   gatlingVersion = dependencyVersion("versionGatling")
-  simulations = closureOf<PatternFilterable> {
-    include("**/KeyListSpillingSimulation*")
+  if (null != System.getProperty("gatling.logLevel")) {
+    logLevel = System.getProperty("gatling.logLevel")
   }
 }

@@ -116,6 +116,7 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
       @Nonnull Callable<Void> validator)
       throws ReferenceNotFoundException, ReferenceConflictException {
 
+
     ImmutableCommitParams.Builder commitAttempt =
         ImmutableCommitParams.builder()
             .toBranch(branch)
@@ -126,10 +127,6 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
     Map<Key, ContentId> expectedContentIdByKey = new HashMap<>();
 
 //    LOG.info("Committing to branch={} expectedHead={}", branch, expectedHead);
-
-//    LOG.error("Put to branch: {}", branch.getName());
-//    System.err.println("stderr");
-//    System.out.println("stdout");
 
     for (Operation<CONTENT> operation : operations) {
       if (operation instanceof Put) {
@@ -192,10 +189,10 @@ public class PersistVersionStore<CONTENT, METADATA, CONTENT_TYPE extends Enum<CO
       }
     }
 
-    boolean cautiousChecks = false;
-//    boolean cautiousChecks =
-//      null != isCautiousContentIdChecks ? isCautiousContentIdChecks :
-//        "CAUTIOUS".equalsIgnoreCase(databaseAdapter.getConfig().getContentIdConflictChecks());
+//    boolean cautiousChecks = false;
+    // TODO restore consideration of the request-level override
+    boolean cautiousChecks =
+        "CAUTIOUS".equalsIgnoreCase(databaseAdapter.getConfig().getContentIdConflictChecks());
 
     /*
      * If expectedHead is present, then attempt to detect conflicts between:

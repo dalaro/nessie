@@ -1360,18 +1360,39 @@ public abstract class AbstractDatabaseAdapter<
               stream = Stream.concat(stream, embedded);
             }
 
-            List<Hash> keyListIds = e.getKeyListsIds();
-            if (keyListIds != null && !keyListIds.isEmpty()) {
-              // If there are nested key-lists, retrieve those lazily and add the keys from these
+            if (null != remainingKeys) {
+              // TODO extract shared method, delete copy-paste
+              List<KeyListEntry> keyListEntries;
+              LOGGER.error("Fetching {} keys using {} ({} entities)", remainingKeys.size(), e.getKeyListVariant(), e.getKeyListsIds().size());
+              switch (e.getKeyListVariant()) {
+                case OPEN_ADDRESSING:
+                  keyListEntries =
+                    fetchValuesHandleOpenAddressingKeyList(ctx, remainingKeys, e);
+                  break;
+                case EMBEDDED_AND_EXTERNAL_MRU:
+                  keyListEntries = fetchValuesHandleKeyList(ctx, remainingKeys, e);
+                  break;
+                default:
+                  throw new IllegalStateException(
+                    "Unknown key list variant " + e.getKeyListVariant());
+              }
+              // Apply predicate to keys within the entity subset retrieved above
+              stream = Stream.concat(stream, keyListEntries.stream().filter(keyPredicate));
+            } else {
+              // Retrieve all keylist entities
+              List<Hash> keyListIds = e.getKeyListsIds();
+              if (keyListIds != null && !keyListIds.isEmpty()) {
+                // If there are nested key-lists, retrieve those lazily and add the keys from these
 
-              Stream<KeyListEntry> entities =
+                Stream<KeyListEntry> entities =
                   Stream.of(keyListIds)
-                      .flatMap(ids -> fetchKeyLists(ctx, ids))
-                      .map(KeyListEntity::getKeys)
-                      .map(KeyList::getKeys)
-                      .flatMap(Collection::stream)
-                      .filter(keyPredicate);
-              stream = Stream.concat(stream, entities);
+                    .flatMap(ids -> fetchKeyLists(ctx, ids))
+                    .map(KeyListEntity::getKeys)
+                    .map(KeyList::getKeys)
+                    .flatMap(Collection::stream)
+                    .filter(keyPredicate);
+                stream = Stream.concat(stream, entities);
+              }
             }
           }
 

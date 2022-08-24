@@ -22,231 +22,196 @@ import org.projectnessie.error.NessieReferenceNotFoundException
 import org.projectnessie.model.Operation.Put
 import org.projectnessie.model._
 import org.projectnessie.perftest.gatling.Predef.nessie
+import org.slf4j.LoggerFactory
 
-import java.util.concurrent.TimeUnit
-import scala.concurrent.duration.{FiniteDuration, HOURS, NANOSECONDS, SECONDS}
-import scala.util.Random
+import scala.collection.mutable
+import scala.concurrent.duration.{FiniteDuration, SECONDS}
 import scala.jdk.CollectionConverters._
 
-/** Gatling simulation to perform commits against Nessie. It has a bunch of
-  * configurables, see [[CommitToBranchParams]]
-  */
+/**
+ * Measure throughput of incremental put commits against an existing HEAD with a preexisting live keylist.
+ *
+ * @see [[KeyListSpillingParams]]
+ */
 class KeyListSpillingSimulation extends Simulation {
 
+  private val log = LoggerFactory.getLogger(classOf[KeyListSpillingSimulation])
 
-  val paddingBuilder = new StringBuilder()
-
+  private val paddingBuilder: mutable.StringBuilder = new mutable.StringBuilder()
   for (i <- 1 to 32) {
     paddingBuilder.append("abcdefg_")
   }
-  val padding = paddingBuilder.toString();
+  val padding: String = paddingBuilder.toString();
 
-  val params: KeyListSpillingParams = KeyListSpillingParams.fromSystemProperties()
+  /**
+   * Configuration specific to this simulation and scenario.
+   */
+  private val params: KeyListSpillingParams = KeyListSpillingParams.fromSystemProperties()
 
-  /** The actual benchmark code to measure Nessie-commit performance in various
-    * scenarios.
-    */
+  /**
+   * Session key for the zero-indexed commit number associated with the current simulated Gatling user.
+   *
+   * Gatling initializes and increments this for us via [[repeat]].
+   */
+  private val commitIndexKey = "commitIndex"
+
+  /**
+   * Commit once to a branch conveyed via the [[Session]].
+   *
+   * Although the returned chain fragment will commit only once, the number of put operations in that commit is
+   * determined by [[KeyListSpillingParams.putsPerTestCommit]].
+   */
   private def commitToBranch: ChainBuilder = {
-    val chain = {
-      /*
-      exec(
-        // fetch the previous state of the table (if exists)
-        nessie("FetchContent")
-          .execute { (client, session) =>
-            // Current Nessie Branch object
-            val branch = session("branch").as[Branch]
-            // Table used in the Nessie commit
-            val tableName = params.makeTableName(session)
-
-            val key = ContentKey.of("name", "space", tableName)
-
-            val existingTable =
-              client.getContent.reference(branch).key(key).get().get(key)
-
-            // Store precomputed values in the session
-            session
-              .set("existingTable", Option(existingTable))
-              .set("key", key)
-          }
-      ).
-      */
       exec(
         // Create / update the table
-        nessie("Commit")
+        nessie("TestBranchCommit")
           .execute { (client, session) =>
 
-            val parentHash = client.getReference.refName(params.getBranchName()).get()
-
-            val commitIndex : Int =
-              if (session.contains("commitIndex")) {
-                session("commitIndex").as[Int]
-              } else {
-                new Random().nextInt()
-              }
-
-            // The commit number is the loop-variable declared buildScenario()
-            val commitNum = session("commitNum").asOption[Int].get
-            // Current Nessie Branch object
-            val branch = session("branch").as[Branch]
-//            val branch = Branch.of(params.getBranchName(), parentHash.getHash)
-            // Our "user ID", an integer supplied by Gatling
+            // This is initialized and incremented on our behalf by Gatling (see buildScenario)
+            val commitIndex = session(commitIndexKey).as[Int]
+            val commitNum = commitIndex + 1
+            val testBranch = session("branch").as[Branch]
             val userId = session.userId
-            // Precomputed key and table from the previous action
-//            val key = session("key").as[ContentKey]
-//            val key = ContentKey.of(s"synthetic-key worker=$userId commitIndex=$commitIndex")
-            val key = ContentKey.of(s"$userId $commitIndex" + padding)
-
-            val expectedTable = Option.empty
-
-            val metadataLocation = s"metadata_${userId}_$commitNum"
-
-            val table =
-              if (expectedTable.isEmpty)
-                IcebergTable.of(metadataLocation, 42, 43, 44, 45)
-              else
-                ImmutableIcebergTable.builder
-                  .from(expectedTable.get)
-                  .metadataLocation(metadataLocation)
-                  .build()
+            val putOps: List[Operation] = List.range(0, params.putsPerTestCommit).map(
+              i => {
+                val key = ContentKey.of(s"${userId} ${commitIndex} ${i}" + padding)
+                val table = IcebergTable.of(s"metadata_${userId}_${commitNum}_${i}", 42, 43, 44, 45)
+                Put.of(key, table, null)
+              }
+            )
 
             // Call the Nessie client operation to perform a commit
             val updatedBranch = client
               .commitMultipleOperations()
-              .branch(branch)
+              .branch(testBranch)
               .commitMeta(
-                CommitMeta.fromMessage(s"worker commit userId=$userId commitNum=$commitNum")
+                CommitMeta.fromMessage(s"worker commit userId=${userId} testCommitNum=${commitNum}")
               )
-              .operation(Put.of(key, table, expectedTable.orNull))
+              .operations(putOps.asJava)
               .commit()
 
-            session.set("branch", updatedBranch).set("commitIndex", commitIndex + 1)
+            session.set("branch", updatedBranch)
           }
       )
-    }
-
-    if (params.opRate > 0) {
-      // "pace" the commits, if commit-rate is configured
-      val oneHour = FiniteDuration(1, HOURS)
-      val nanosPerIteration =
-        oneHour.toNanos / (params.opRate * oneHour.toSeconds)
-      pace(FiniteDuration(nanosPerIteration.toLong, NANOSECONDS))
-        .exitBlockOnFail(chain)
-    } else {
-      // if no commit-rate is configured, run "as fast as possible"
-      chain
-    }
   }
 
-  /** Get the [[Branch]] object, create the branch in Nessie if needed.
-    */
-  private def getReference: ChainBuilder = {
+  /**
+   * Delete a test [[Branch]] (if it exists), then (re)create it.
+   *
+   * The test branch's name ends in the Gatling userId (as conveyed through the [[Session]].
+   */
+  private def dropAndCreateTestBranch: ChainBuilder = {
     // If we don't have a reference for the branch yet, then try to create the branch and try to fetch the reference
-    exec(
-      nessie(s"Create branch $params.branch")
-        .execute { (client, session) =>
-          val parentBranch: Reference = client
-            .getReference
-            .refName(params.getBranchName())
-            .get()
 
-          // create the branch (errors will be ignored)
-          val branch = client
-            .createReference()
-            .sourceRefName(params.getBranchName())
-            .reference(Branch.of(params.makeBranchName(session), parentBranch.getHash))
-            .create()
-            .asInstanceOf[Branch]
-          session.set("branch", parentBranch)
-        }
-        // ignore any exception, handled in the following `doIf()`
-        .ignoreException()
-        // don't measure/log this action
-        .dontLog()
-    ).doIf(session => !session.contains("branch")) {
-      exec(
-        nessie(s"Get reference $params.branch")
-          .execute { (client, session) =>
-            // retrieve the Nessie branch reference and store it in the Gatling session object
-            val branch = client.getReference
-              .refName(params.makeBranchName(session))
+    exec(
+      nessie(s"DeleteTestBranchIfExists")
+        .execute { (client, session) =>
+          val testBranchName = params.getTestBranchName(session)
+
+          // Get the test branch (we must know its hash to delete it)
+          try {
+            val testBranch: Reference = client
+              .getReference
+              .refName(testBranchName)
               .get()
               .asInstanceOf[Branch]
 
-            val parentBranch: Reference = client
-              .getReference
-              .refName(params.getBranchName())
-              .get()
-            session.set("branch", parentBranch)
+            // Delete the test branch
+            if (null != testBranch) {
+              client
+                .deleteBranch()
+                .branchName(testBranchName)
+                .hash(testBranch.getHash)
+                .delete()
+            }
+          } catch {
+            case e: NessieReferenceNotFoundException =>
+              log.debug("Test branch did not exist during delete-if-exists operation" +
+                "(this is normal on a clean Nessie backend, or when changing some benchmark parameters on a dirty one)", e)
           }
-          // don't measure/log this action
-          .dontLog()
-      )
-    }
+
+          session
+        }
+    ).exec(
+      nessie(s"CreateTestBranch")
+        .execute { (client, session) =>
+          // Get the base branch
+          val parentBranch: Reference = client
+            .getReference
+            .refName(params.getBaseBranchName())
+            .get()
+
+          // Create a new test branch from the base branch
+          val testBranch = client
+            .createReference()
+            .sourceRefName(params.getBaseBranchName())
+            .reference(Branch.of(params.getTestBranchName(session), parentBranch.getHash))
+            .create()
+            .asInstanceOf[Branch]
+
+          session.set("branch", testBranch)
+        }
+    )
   }
 
+  /**
+   * Constructs a scenario to prep and commit to a test branch.
+   *
+   * The test branch is deleted if it exists, then created.  Commits to the new branch are repeated
+   * [[KeyListSpillingParams.testCommitCount]] times.
+   */
   private def buildScenario(): ScenarioBuilder = {
-    val scn = scenario("KeyList-Spilling")
-      .exec(getReference)
-
-    if (params.numberOfCommits > 0) {
-      // Process configured number of commits
-      scn.repeat(params.numberOfCommits, "commitNum") {
+    scenario("KeyList-Spilling")
+      .exec(dropAndCreateTestBranch)
+      .repeat(params.testCommitCount, commitIndexKey) {
         commitToBranch
       }
-    } else {
-      // otherwise run "forever" (or until "max-duration")
-      scn.forever("commitNum") {
-        commitToBranch
-      }
-    }
   }
 
-  /** Sets up the simulation. Implemented as a function to respect the optional
-    * maximum-duration.
-    */
+  /**
+   * Creates our simulation and invokes Gatling's [[io.gatling.core.scenario.Simulation.setUp]]
+   */
   private def doSetUp(): SetUp = {
     val nessieProtocol: NessieProtocol = nessie().clientFromSystemProperties()
 
-    val branchName = params.getBranchName();
+    val branchName = params.getBaseBranchName();
 
-    // Drop test branch, if it exists
+    // Drop base branch, if it exists
     try {
       val ref = nessieProtocol.client.getReference.refName(branchName).get()
 
       if (null != ref) {
-        nessieProtocol.client.deleteBranch().branch(Branch.of(params.getBranchName(), ref.getHash)).delete()
+        nessieProtocol.client.deleteBranch().branch(Branch.of(params.getBaseBranchName(), ref.getHash)).delete()
       }
     } catch {
       case e: NessieReferenceNotFoundException => {
-        println(s"Reference $branchName does not exist, not attempting to delete")
+        log.info(s"Base branch $branchName does not exist, " +
+          s"not attempting to delete (this is normal when running against a clean Nessie backend)", e)
       }
     }
 
-    // Create test branch
-    nessieProtocol.client.createReference().reference(Branch.of(params.getBranchName(), null)).create()
+    // Create base branch
+    nessieProtocol.client.createReference().reference(Branch.of(params.getBaseBranchName(), null)).create()
 
+    // Load test fixture into base branch
     val branch = nessieProtocol.client.getReference.refName(branchName).get().asInstanceOf[Branch]
-
-    // Load test fixture
     loadData(nessieProtocol, branch)
 
-    System.out.println(params.asPrintableString())
+    // Leave branch-and-commit cycles to Gatling via our scenario
+    val s: SetUp = setUp(buildScenario().inject(
+      constantConcurrentUsers(1).during(FiniteDuration(params.targetDurationSeconds, SECONDS))
+    )).maxDuration(FiniteDuration(params.targetDurationSeconds, SECONDS))
 
-    // Handoff read phase to Gatling
-//    var s: SetUp = setUp(buildScenario().inject(atOnceUsers(params.numUsers)))
-    var s: SetUp = setUp(buildScenario().inject(
-      constantConcurrentUsers(1/* params.numUsers */).during(scala.concurrent.duration.Duration.apply(1, TimeUnit.SECONDS))
-    ))
-    if (params.durationSeconds > 0) {
-      s = s.maxDuration(FiniteDuration(params.durationSeconds, SECONDS))
-    }
     s.protocols(nessieProtocol)
   }
 
-  private def loadData(nessieProtocol: NessieProtocol, branch: Branch) = {
+  private def loadData(nessieProtocol: NessieProtocol, branch: Branch): Unit = {
 
-    val commitCount = 98
-    val operationCount = 10000
+    val commitCount = params.baseCommitCount
+    val operationCount = params.putsPerBaseCommit
+
+    log.info("Loading shared fixture into branch {}: {} commits, each with {} distinctly-keyed put operations",
+      branch, commitCount, operationCount)
 
     for (i <- 1 to commitCount) {
 
@@ -258,12 +223,12 @@ class KeyListSpillingSimulation extends Simulation {
           IcebergTable.of("/iceberg/table", 42, 42, 42, 42)))
         .toList
 
-      println("op count: " + operations.size)
+      log.debug("Preparing {} put operations in commit {}/{}", operations.size, i, commitCount)
 
       nessieProtocol.client.commitMultipleOperations()
         .operations(operations.asJava)
         .branch(branch)
-        .commitMeta(CommitMeta.fromMessage(s"commit $i / $commitCount"))
+        .commitMeta(CommitMeta.fromMessage(s"Base branch commit ${i}/${commitCount}"))
         .commit();
     }
   }

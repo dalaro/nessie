@@ -1230,6 +1230,8 @@ public abstract class TxDatabaseAdapter
       return Stream.empty();
     }
 
+//    LOG.info("doFetchKeyLists N={}", keyListsIds.size(), new Exception(""));
+
     try (Traced ignore = trace("doFetchKeyLists.stream")) {
       return JdbcSelectSpliterator.buildStream(
           c.conn(),
@@ -1242,7 +1244,6 @@ public abstract class TxDatabaseAdapter
             }
           },
           (rs) -> {
-            LOG.info("TxDatabaseAdapter: retrieved up to {} keylists", keyListsIds.size());
             return KeyListEntity.of(Hash.of(rs.getString(1)), protoToKeyList(rs.getBytes(2)));
           });
     }
