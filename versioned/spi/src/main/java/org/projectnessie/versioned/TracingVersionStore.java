@@ -92,6 +92,7 @@ public class TracingVersionStore implements VersionStore {
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> referenceHash,
       @Nonnull CommitMeta metadata,
+      Boolean unsafeConflicts,
       @Nonnull List<Operation> operations,
       @Nonnull Callable<Void> validator)
       throws ReferenceNotFoundException, ReferenceConflictException {
@@ -102,7 +103,7 @@ public class TracingVersionStore implements VersionStore {
                 b.withTag(TAG_BRANCH, safeRefName(branch))
                     .withTag(TAG_HASH, safeToString(referenceHash))
                     .withTag(TAG_NUM_OPS, safeSize(operations)),
-            () -> delegate.commit(branch, referenceHash, metadata, operations, validator));
+            () -> delegate.commit(branch, referenceHash, metadata, unsafeConflicts, operations, validator));
   }
 
   @Override

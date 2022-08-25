@@ -16,6 +16,8 @@
 package org.projectnessie.client.api;
 
 import java.util.List;
+
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.error.NessieConflictException;
 import org.projectnessie.error.NessieNotFoundException;
 import org.projectnessie.model.Branch;
@@ -35,6 +37,8 @@ public interface CommitMultipleOperationsBuilder
   CommitMultipleOperationsBuilder operations(List<Operation> operations);
 
   CommitMultipleOperationsBuilder operation(Operation operation);
+
+  CommitMultipleOperationsBuilder conflictMode(ConflictOption conflictMode);
 
   Branch commit() throws NessieNotFoundException, NessieConflictException;
 }

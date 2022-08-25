@@ -165,7 +165,7 @@ public interface BatchAccessChecker {
   /**
    * Checks whether the given role/principal is allowed to update an entity value as defined by the
    * {@link ContentKey} for the given {@link Branch}, called for a {@link Operation.Put} operation
-   * for a {@link TreeApi#commitMultipleOperations(String, String, Operations) commit}.
+   * for a {@link TreeApi#commitMultipleOperations(String, String, org.projectnessie.api.params.ConflictOption, Operations) commit}.
    *
    * <p>Adds an implicit {@link #canViewReference(NamedRef)}.
    *
@@ -182,7 +182,7 @@ public interface BatchAccessChecker {
   /**
    * Checks whether the given role/principal is allowed to delete an entity value as defined by the
    * {@link ContentKey} for the given {@link Branch}, called for a {@link Operation.Delete}
-   * operation for a {@link TreeApi#commitMultipleOperations(String, String, Operations) commit}.
+   * operation for a {@link TreeApi#commitMultipleOperations(String, String, org.projectnessie.api.params.ConflictOption, Operations) commit}.
    *
    * <p>Adds an implicit {@link #canViewReference(NamedRef)}.
    *

@@ -19,7 +19,10 @@ import javax.annotation.Nullable;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Pattern;
+import javax.ws.rs.DefaultValue;
+
 import org.projectnessie.api.params.CommitLogParams;
+import org.projectnessie.api.params.ConflictOption;
 import org.projectnessie.api.params.EntriesParams;
 import org.projectnessie.api.params.GetReferenceParams;
 import org.projectnessie.api.params.ReferencesParams;
@@ -180,21 +183,22 @@ public interface TreeApi {
    * hash as its latest commit. The hash in the successful response contains the hash of the commit
    * that contains the operations of the invocation.
    *
-   * @param branchName Branch to change, defaults to default branch.
-   * @param expectedHash Expected hash of branch.
-   * @param operations {@link Operations} to apply
+   * @param branchName     Branch to change, defaults to default branch.
+   * @param expectedHash   Expected hash of branch.
+   * @param operations     {@link Operations} to apply
    * @return updated {@link Branch} objects with the hash of the new HEAD
    * @throws NessieNotFoundException if {@code branchName} could not be found
    * @throws NessieConflictException if the operations could not be applied to some conflict, which
-   *     is either caused by a conflicting commit or concurrent commits.
+   *                                 is either caused by a conflicting commit or concurrent commits.
    */
   Branch commitMultipleOperations(
-      @Valid
+    @Valid
           @NotNull
           @Pattern(regexp = Validation.REF_NAME_REGEX, message = Validation.REF_NAME_MESSAGE)
           String branchName,
-      @Valid @NotNull @Pattern(regexp = Validation.HASH_REGEX, message = Validation.HASH_MESSAGE)
+    @Valid @NotNull @Pattern(regexp = Validation.HASH_REGEX, message = Validation.HASH_MESSAGE)
           String expectedHash,
-      @Valid @NotNull Operations operations)
+    @Valid @NotNull ConflictOption conflictOption,
+    @Valid @NotNull Operations operations)
       throws NessieNotFoundException, NessieConflictException;
 }

@@ -122,6 +122,8 @@ import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefLogEntry;
 import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefLogEntry.Operation;
 import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefLogParents;
 import org.projectnessie.versioned.persist.serialize.AdapterTypes.RefType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Transactional/relational {@link AbstractDatabaseAdapter} implementation using JDBC primitives.
@@ -136,6 +138,9 @@ public abstract class TxDatabaseAdapter
   protected static final String REF_TYPE_BRANCH = "b";
   /** Value for {@link SqlStatements#TABLE_NAMED_REFERENCES}.{@code ref_type} for a tag. */
   protected static final String REF_TYPE_TAG = "t";
+
+  @SuppressWarnings("UnusedVariable") // TODO use or delete
+  private static final Logger LOG = LoggerFactory.getLogger(TxDatabaseAdapter.class);
 
   private final TxConnectionProvider<?> db;
 
@@ -219,7 +224,15 @@ public abstract class TxDatabaseAdapter
   @MustBeClosed
   public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter)
       throws ReferenceNotFoundException {
-    return withConnectionWrapper(conn -> keysForCommitEntry(conn, commit, keyFilter));
+    return keys(commit, keyFilter, null);
+  }
+
+
+  @Override
+  @MustBeClosed
+  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
+    throws ReferenceNotFoundException {
+    return withConnectionWrapper(conn -> keysForCommitEntry(conn, commit, keyFilter, whitelist));
   }
 
   @Override
@@ -1172,6 +1185,8 @@ public abstract class TxDatabaseAdapter
       return Stream.empty();
     }
 
+//    LOG.info("doFetchKeyLists N={}", keyListsIds.size(), new Exception(""));
+
     try (Traced ignore = trace("doFetchKeyLists.stream")) {
       return JdbcSelectSpliterator.buildStream(
           c.conn(),
@@ -1183,7 +1198,9 @@ public abstract class TxDatabaseAdapter
               ps.setString(i++, id.asString());
             }
           },
-          (rs) -> KeyListEntity.of(Hash.of(rs.getString(1)), protoToKeyList(rs.getBytes(2))));
+          (rs) -> {
+            return KeyListEntity.of(Hash.of(rs.getString(1)), protoToKeyList(rs.getBytes(2)));
+          });
     }
   }
 

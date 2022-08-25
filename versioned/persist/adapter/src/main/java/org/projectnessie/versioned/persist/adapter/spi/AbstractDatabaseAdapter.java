@@ -73,7 +73,9 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.projectnessie.model.Content;
+
 import org.projectnessie.versioned.BranchName;
 import org.projectnessie.versioned.ContentAttachment;
 import org.projectnessie.versioned.Diff;
@@ -168,7 +170,7 @@ public abstract class AbstractDatabaseAdapter<
     this.eventConsumer = eventConsumer;
   }
 
-  @VisibleForTesting
+  @Override
   public CONFIG getConfig() {
     return config;
   }
@@ -1317,6 +1319,12 @@ public abstract class AbstractDatabaseAdapter<
     return keysForCommitEntry(ctx, hash, keyFilter, h -> null);
   }
 
+  protected Stream<KeyListEntry> keysForCommitEntry(
+    OP_CONTEXT ctx, Hash hash, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
+    throws ReferenceNotFoundException {
+    return keysForCommitEntry(ctx, hash, keyFilter, h -> null, whitelist);
+  }
+
   /** Retrieve the content-keys and their types for the commit-log-entry with the given hash. */
   @MustBeClosed
   protected Stream<KeyListEntry> keysForCommitEntry(
@@ -1325,12 +1333,29 @@ public abstract class AbstractDatabaseAdapter<
       KeyFilterPredicate keyFilter,
       @Nonnull Function<Hash, CommitLogEntry> inMemoryCommits)
       throws ReferenceNotFoundException {
+      return keysForCommitEntry(ctx, hash, keyFilter, inMemoryCommits, null);
+  }
+
+  /** Retrieve the content-keys and their types for the commit-log-entry with the given hash. */
+  protected Stream<KeyListEntry> keysForCommitEntry(
+    OP_CONTEXT ctx,
+    Hash hash,
+    KeyFilterPredicate keyFilter,
+    @Nonnull Function<Hash, CommitLogEntry> inMemoryCommits,
+    @Nullable Collection<Key> whitelist)
+      throws ReferenceNotFoundException {
     // walk the commit-logs in reverse order - starting with the last persisted key-list
 
     Set<Key> seen = new HashSet<>();
+    final Set<Key> remainingKeys = null == whitelist ? null : new HashSet<>(whitelist);
 
     Predicate<KeyListEntry> predicate =
-        keyListEntry -> keyListEntry != null && seen.add(keyListEntry.getKey());
+        keyListEntry -> {
+          if (null != remainingKeys && null != keyListEntry) {
+            remainingKeys.remove(keyListEntry.getKey());
+          }
+          return keyListEntry != null && seen.add(keyListEntry.getKey());
+        };
     if (keyFilter != null) {
       predicate =
           predicate.and(kt -> keyFilter.check(kt.getKey(), kt.getContentId(), kt.getPayload()));
@@ -1340,12 +1365,17 @@ public abstract class AbstractDatabaseAdapter<
     @SuppressWarnings("MustBeClosedChecker")
     Stream<CommitLogEntry> log =
         takeUntilIncludeLast(
-            readCommitLogStream(ctx, hash, inMemoryCommits), CommitLogEntry::hasKeySummary);
+            readCommitLogStream(ctx, hash, inMemoryCommits),
+            cle -> cle.hasKeySummary() || (null != remainingKeys && remainingKeys.isEmpty())); // TODO this clause would better fit exclude-last than include-last
+
     return log.flatMap(
         e -> {
 
           // Add CommitLogEntry.deletes to "seen" so these keys won't be returned
           seen.addAll(e.getDeletes());
+          if (null != remainingKeys) {
+            remainingKeys.removeAll(e.getDeletes());
+          }
 
           // Return from CommitLogEntry.puts first
           Stream<KeyListEntry> stream =
@@ -1361,30 +1391,50 @@ public abstract class AbstractDatabaseAdapter<
             KeyList embeddedKeyList = e.getKeyList();
             if (embeddedKeyList != null) {
               Stream<KeyListEntry> embedded =
-                  embeddedKeyList.getKeys().stream().filter(keyPredicate);
+                embeddedKeyList.getKeys().stream().filter(keyPredicate);
               stream = Stream.concat(stream, embedded);
             }
 
-            List<Hash> keyListIds = e.getKeyListsIds();
-            if (keyListIds != null && !keyListIds.isEmpty()) {
-              // If there are nested key-lists, retrieve those lazily and add the keys from these
+            if (null != remainingKeys) {
+              // TODO extract shared method, delete copy-paste
+              List<KeyListEntry> keyListEntries;
+              LOGGER.debug("Fetching {} keys using {} ({} entities)", remainingKeys.size(), e.getKeyListVariant(), e.getKeyListsIds().size());
+              switch (e.getKeyListVariant()) {
+                case OPEN_ADDRESSING:
+                  keyListEntries =
+                    fetchValuesHandleOpenAddressingKeyList(ctx, remainingKeys, e);
+                  break;
+                case EMBEDDED_AND_EXTERNAL_MRU:
+                  keyListEntries = fetchValuesHandleKeyList(ctx, remainingKeys, e);
+                  break;
+                default:
+                  throw new IllegalStateException(
+                    "Unknown key list variant " + e.getKeyListVariant());
+              }
+              // Apply predicate to keys within the entity subset retrieved above
+              stream = Stream.concat(stream, keyListEntries.stream().filter(keyPredicate));
+            } else {
+              // Retrieve all keylist entities
+              List<Hash> keyListIds = e.getKeyListsIds();
+              if (keyListIds != null && !keyListIds.isEmpty()) {
+                // If there are nested key-lists, retrieve those lazily and add the keys from these
 
-              Stream<KeyListEntry> entities =
+                Stream<KeyListEntry> entities =
                   Stream.of(keyListIds)
-                      .flatMap(
-                          ids -> {
-                            @SuppressWarnings("MustBeClosedChecker")
-                            Stream<KeyListEntity> r = fetchKeyLists(ctx, ids);
-                            return r;
-                          })
-                      .map(KeyListEntity::getKeys)
-                      .map(KeyList::getKeys)
-                      .flatMap(Collection::stream)
-                      .filter(keyPredicate);
-              stream = Stream.concat(stream, entities);
+                    .flatMap(
+                      ids -> {
+                        @SuppressWarnings("MustBeClosedChecker")
+                        Stream<KeyListEntity> r = fetchKeyLists(ctx, ids);
+                        return r;
+                      })
+                    .map(KeyListEntity::getKeys)
+                    .map(KeyList::getKeys)
+                    .flatMap(Collection::stream)
+                    .filter(keyPredicate);
+                stream = Stream.concat(stream, entities);
+              }
             }
           }
-
           return stream;
         });
   }

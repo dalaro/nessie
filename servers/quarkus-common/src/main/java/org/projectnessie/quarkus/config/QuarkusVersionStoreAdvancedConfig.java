@@ -88,6 +88,12 @@ public interface QuarkusVersionStoreAdvancedConfig
   @Override
   int getCommitRetries();
 
+  @WithName("content-id-conflict-checks")
+  @WithDefault("" + DEFAULT_CONTENT_ID_CONFLICT_CHECKS)
+  @WithConverter(RepoIdConverter.class)
+  @Override
+  String getContentIdConflictChecks();
+
   @WithName("retry.initial-sleep.millis-lower")
   @WithDefault("" + DEFAULT_RETRY_INITIAL_SLEEP_MILLIS_LOWER)
   @Override

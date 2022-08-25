@@ -81,12 +81,23 @@ public interface VersionStore {
    * @throws NullPointerException if one of the argument is {@code null}
    */
   Hash commit(
+    @Nonnull BranchName branch,
+    @Nonnull Optional<Hash> referenceHash,
+    @Nonnull CommitMeta metadata,
+    Boolean isCautiousContentIdChecks,
+    @Nonnull List<Operation> operations,
+    @Nonnull Callable<Void> validator)
+    throws ReferenceNotFoundException, ReferenceConflictException;
+
+  default Hash commit(
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> referenceHash,
       @Nonnull CommitMeta metadata,
       @Nonnull List<Operation> operations,
       @Nonnull Callable<Void> validator)
-      throws ReferenceNotFoundException, ReferenceConflictException;
+      throws ReferenceNotFoundException, ReferenceConflictException {
+    return commit(branch, referenceHash, metadata, false, operations, validator);
+  }
 
   default Hash commit(
       @Nonnull BranchName branch,

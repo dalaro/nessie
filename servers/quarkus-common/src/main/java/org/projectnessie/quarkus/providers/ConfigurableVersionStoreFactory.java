@@ -27,6 +27,7 @@ import org.projectnessie.versioned.MetricsVersionStore;
 import org.projectnessie.versioned.TracingVersionStore;
 import org.projectnessie.versioned.VersionStore;
 import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
+import org.projectnessie.versioned.persist.adapter.DatabaseAdapterConfig;
 import org.projectnessie.versioned.persist.store.PersistVersionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +52,7 @@ public class ConfigurableVersionStoreFactory {
    */
   @Inject
   public ConfigurableVersionStoreFactory(
-      VersionStoreConfig storeConfig, DatabaseAdapter databaseAdapter) {
+    VersionStoreConfig storeConfig, DatabaseAdapter databaseAdapter) {
     this.storeConfig = storeConfig;
     this.databaseAdapter = databaseAdapter;
   }

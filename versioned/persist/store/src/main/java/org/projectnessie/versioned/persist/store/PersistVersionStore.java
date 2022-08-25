@@ -23,9 +23,11 @@ import com.google.protobuf.ByteString;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
@@ -35,6 +37,9 @@ import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import org.projectnessie.model.CommitMeta;
 import org.projectnessie.model.Content;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.projectnessie.versioned.BranchName;
 import org.projectnessie.versioned.Commit;
 import org.projectnessie.versioned.CommitMetaSerializer;
@@ -71,6 +76,7 @@ import org.projectnessie.versioned.persist.adapter.ContentIdAndBytes;
 import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
 import org.projectnessie.versioned.persist.adapter.ImmutableCommitParams;
 import org.projectnessie.versioned.persist.adapter.KeyFilterPredicate;
+import org.projectnessie.versioned.persist.adapter.KeyListEntry;
 import org.projectnessie.versioned.persist.adapter.KeyWithBytes;
 import org.projectnessie.versioned.persist.adapter.MergeParams;
 import org.projectnessie.versioned.persist.adapter.TransplantParams;
@@ -79,7 +85,11 @@ import org.projectnessie.versioned.store.DefaultStoreWorker;
 public class PersistVersionStore implements VersionStore {
 
   private final DatabaseAdapter databaseAdapter;
+  @SuppressWarnings("UnusedVariable") // TODO use or delete
+  private final boolean fullContentIdChecks;
   protected static final StoreWorker STORE_WORKER = DefaultStoreWorker.instance();
+  @SuppressWarnings("UnusedVariable") // TODO use or delete
+  private static final Logger LOG = LoggerFactory.getLogger(PersistVersionStore.class);
 
   @SuppressWarnings("unused") // Keep StoreWorker parameter for compatibiltiy reasons
   public PersistVersionStore(DatabaseAdapter databaseAdapter, StoreWorker storeWorker) {
@@ -88,6 +98,7 @@ public class PersistVersionStore implements VersionStore {
 
   public PersistVersionStore(DatabaseAdapter databaseAdapter) {
     this.databaseAdapter = databaseAdapter;
+    this.fullContentIdChecks = databaseAdapter.getConfig().getContentIdConflictChecks().equalsIgnoreCase("CAUTIOUS");
   }
 
   @Override
@@ -107,9 +118,11 @@ public class PersistVersionStore implements VersionStore {
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> expectedHead,
       @Nonnull CommitMeta metadata,
+      Boolean isCautiousContentIdChecks,
       @Nonnull List<Operation> operations,
       @Nonnull Callable<Void> validator)
       throws ReferenceNotFoundException, ReferenceConflictException {
+
 
     ImmutableCommitParams.Builder commitAttempt =
         ImmutableCommitParams.builder()
@@ -118,7 +131,11 @@ public class PersistVersionStore implements VersionStore {
             .commitMetaSerialized(serializeMetadata(metadata))
             .validator(validator);
 
+    Map<Key, ContentId> expectedContentIdByKey = new HashMap<>();
+
     for (Operation operation : operations) {
+//    LOG.info("Committing to branch={} expectedHead={}", branch, expectedHead);
+
       if (operation instanceof Put) {
         Put op = (Put) operation;
         Content content = op.getValue();
@@ -159,6 +176,12 @@ public class PersistVersionStore implements VersionStore {
               contentId,
               expectedContentId,
               op.getKey());
+          // Retain this (content-key, expected-content-id) pair for conflict-check against existing committed data
+          if (expectedHead.isPresent()) {
+            expectedContentIdByKey.put(op.getKey(), expectedContentId);
+          }
+        } else if (expectedHead.isPresent()) {
+          expectedContentIdByKey.put(op.getKey(), null);
         }
 
         Preconditions.checkState(
@@ -172,6 +195,66 @@ public class PersistVersionStore implements VersionStore {
         throw new IllegalArgumentException(String.format("Unknown operation type '%s'", operation));
       }
     }
+
+//    boolean cautiousChecks = false;
+    // TODO restore consideration of the request-level override
+    boolean cautiousChecks =
+        "CAUTIOUS".equalsIgnoreCase(databaseAdapter.getConfig().getContentIdConflictChecks());
+
+//    LOG.info("PersistVersionStore.commit cautiousChecks={}", cautiousChecks);
+
+    /*
+     * If expectedHead is present, then attempt to detect conflicts between:
+     *
+     * a) expected content-ids provided by Put operations, and
+     *
+     * b) actual content-ids present at the HEAD referenced by expectedHash (at the same content-keys)
+     */
+    if (cautiousChecks && expectedHead.isPresent()) {
+      Callable<Void> putExpectationsValidator = () -> {
+        Stream<KeyListEntry> allEntries = databaseAdapter.keys(expectedHead.get(), KeyFilterPredicate.ALLOW_ALL, expectedContentIdByKey.keySet());
+
+        allEntries.forEach( kle -> {
+          ContentId actual = kle.getContentId();
+          Key key = kle.getKey();
+//          LOG.info("Checking entry Key={} Actual-Content-Id={}", key, actual);
+
+          if (expectedContentIdByKey.containsKey(key)) {
+            ContentId expected = expectedContentIdByKey.get(key);
+//            LOG.info("Checking Put Key={} Actual-Content-Id={} Expected-Content-Id={}", key, actual, expected);
+
+            if (null == expected && null != actual) {
+              // throw exception: something exists at this key
+              throw new IllegalArgumentException(String.format("Existing content found with content-id '%s' for key '%s'",
+                actual, key));
+            } else if (!expected.equals(actual)) {
+              // throw exception: what exists at this key doesn't match expectation
+              throw new IllegalArgumentException(String.format("Expected content-id '%s' conflicts with actual content-id '%s' for key '%s'",
+                expected, actual, key));
+            }
+          }
+        });
+
+//        // TODO consider logging additional conflicts, if present, or perhaps adding a count of suppressed conflicts
+//        Optional<KeyListEntry> conflictEntry = allEntries.findFirst();
+//        if (conflictEntry.isPresent()) {
+//          KeyListEntry kle = conflictEntry.get();
+//          ContentId existing = kle.getContentId();
+//          Key key = kle.getKey();
+//          ContentId expected = expectedContentIdByKey.get(key);
+//          Preconditions.checkState(null != expected, String.format("Null expected content-id for key '%s'", key));
+//          throw new IllegalArgumentException(String.format("Conflict between expected content-id '%s' and actual content-id '%s' for key '%s'",
+//            expected, existing, key));
+//        }
+
+        return null;
+      };
+
+      Callable<Void> combinedValidator = () -> { validator.call(); putExpectationsValidator.call(); return null; };
+      commitAttempt.validator(combinedValidator);
+    }
+
+//    throw new RuntimeException("Put");
 
     return databaseAdapter.commit(commitAttempt.build());
   }

@@ -25,13 +25,25 @@ import org.assertj.core.api.Assumptions;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.projectnessie.client.http.HttpClientException;
+import org.projectnessie.error.BaseNessieClientServerException;
 import org.projectnessie.error.NessieBadRequestException;
 import org.projectnessie.error.NessieConflictException;
 import org.projectnessie.error.NessieNotFoundException;
+import org.projectnessie.model.Branch;
 import org.projectnessie.model.CommitMeta;
+import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
+import org.projectnessie.model.ImmutableOperations;
+import org.projectnessie.model.Operation;
+import org.projectnessie.model.Operations;
+import org.projectnessie.model.Reference;
 import org.projectnessie.model.Tag;
+
+import java.util.stream.Stream;
 
 /** See {@link AbstractTestRest} for details about and reason for the inheritance model. */
 public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRefs {
@@ -457,6 +469,171 @@ public abstract class AbstractRestInvalidWithHttp extends AbstractRestInvalidRef
                 .hasMessageStartingWith(
                     "Bad Request (HTTP/400): Could not resolve type id 'FOOBAR' as a subtype of "
                         + "`org.projectnessie.model.Reference`: known type ids = ["));
+  }
+
+  private static Operations getPutOpSingleton(
+      Content.Type type, String newContentId, String expectedContentId, ContentKey contentKey, String commitMessage) {
+    Content newTable = makeContentWithId(type, newContentId);
+    Content expectedTable = makeContentWithId(type, expectedContentId);
+    final Operation.Put op = Operation.Put.of(contentKey, newTable, expectedTable);
+    return ImmutableOperations.builder()
+        .addOperations(op)
+        .commitMeta(CommitMeta.fromMessage(commitMessage))
+        .build();
+  }
+
+  private static Operations getPutOpSingleton(
+      Content.Type type, String newContentId, ContentKey contentKey, String commitMessage) {
+    Content newTable = makeContentWithId(type, newContentId);
+    final Operation.Put op = Operation.Put.of(contentKey, newTable);
+    return ImmutableOperations.builder()
+        .addOperations(op)
+        .commitMeta(CommitMeta.fromMessage(commitMessage))
+        .build();
+  }
+
+  private String getHeadHash(String branchName) {
+    Reference brh =
+        getHttpClient()
+            .newRequest()
+            .path("trees/tree/{ref}")
+            .resolveTemplate("ref", branchName)
+            .queryParam("fetch", "MINIMAL")
+            .get()
+            .readEntity(Reference.class);
+    return brh.getHash();
+  }
+
+  /**
+   * Jupiter argument-factory-method called for {@link #invalidPutViaHTTP(Content.Type)}
+   */
+  @SuppressWarnings("UnusedMethod")
+  private static Stream<Content.Type> invalidPutWithHttpSource() {
+    return Stream.of(Content.Type.DELTA_LAKE_TABLE, Content.Type.ICEBERG_TABLE, Content.Type.ICEBERG_VIEW);
+  }
+
+  /**
+   * @see AbstractRestInvalidRefs#invalidPutViaAPI(Content.Type)
+   */
+  @ParameterizedTest(name = "invalidPutViaHTTP [{index}] {arguments}")
+//  @EnumSource(value = Content.Type.class, mode = EnumSource.Mode.EXCLUDE, names = {"UNKNOWN", "NAMESPACE"})
+  @MethodSource
+  public void invalidPutViaHTTP(Content.Type type) throws BaseNessieClientServerException {
+
+    final String branchName = "invalidPutViaHTTP";
+    final Branch branch = createBranch(branchName);
+    final ContentKey contentKey = ContentKey.of("foo");
+    final String fakeId = "bar";
+
+    // Specifying expected/existing content when creating new content should fail
+    Operations initialPutWithInvalidExpectedContent =
+        getPutOpSingleton(type, null, null, contentKey, "failed initial put");
+    assertThatThrownBy(
+            () ->
+                unwrap(
+                    () ->
+                        getHttpClient()
+                            .newRequest()
+                            .path("trees/branch/{branchName}/commit")
+                            .resolveTemplate("branchName", branchName)
+                            .queryParam("expectedHash", getHeadHash(branchName))
+                            .post(initialPutWithInvalidExpectedContent)))
+        .isInstanceOf(NessieBadRequestException.class)
+        .hasMessageStartingWith(
+            "Bad Request (HTTP/400): Expected content must not be set when creating new content");
+
+    // Contrasting previous intentional failure, create content successfully
+    Operations initialPut = getPutOpSingleton(type, null, contentKey, "initial put");
+    getHttpClient()
+        .newRequest()
+        .path("trees/branch/{branchName}/commit")
+        .resolveTemplate("branchName", branch.getName())
+        .queryParam("expectedHash", getHeadHash(branchName))
+        .post(initialPut);
+
+    // Read the content we created and record the content ID
+    Content cont =
+        getHttpClient()
+            .newRequest()
+            .path("contents/{key}")
+            .resolveTemplate("key", contentKey.toPathString())
+            .queryParam("ref", branchName)
+            .get()
+            .readEntity(Content.class);
+    String assignedContentId = cont.getId();
+
+    // Attempt to overwrite content as if it was still new, which should fail now
+    assertThatThrownBy(
+            () ->
+                unwrap(
+                    () ->
+                        getHttpClient()
+                            .newRequest()
+                            .path("trees/branch/{branchName}/commit")
+                            .resolveTemplate("branchName", branchName)
+                            .queryParam("expectedHash", getHeadHash(branchName))
+                            .post(initialPut)))
+        .isInstanceOf(NessieBadRequestException.class)
+        .hasMessage(
+            "Bad Request (HTTP/400): Existing content found with content-id '%s' for key '%s'",
+          assignedContentId, contentKey);
+
+    // Attempt overwrite, but specify a bogus content ID in the expected content
+    Operations putWithIncorrectExpectedContentId =
+        getPutOpSingleton(
+            type, assignedContentId, fakeId, contentKey, "put with invalid expected content id");
+    assertThatThrownBy(
+            () ->
+                unwrap(
+                    () ->
+                        getHttpClient()
+                            .newRequest()
+                            .path("trees/branch/{branchName}/commit")
+                            .resolveTemplate("branchName", branchName)
+                            .queryParam("expectedHash", getHeadHash(branchName))
+                            .post(putWithIncorrectExpectedContentId)))
+        .isInstanceOf(NessieBadRequestException.class)
+      .hasMessage(
+        "Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'",
+        assignedContentId, fakeId, contentKey.toPathString());
+
+    // Attempt similar overwrite as immediately above, but specify a bogus content ID on the new content instead
+    Operations putWithIncorrectNewContentId =
+        getPutOpSingleton(
+            type, fakeId, assignedContentId, contentKey, "put with incorrect new content id");
+    assertThatThrownBy(
+            () ->
+                unwrap(
+                    () ->
+                        getHttpClient()
+                            .newRequest()
+                            .path("trees/branch/{branchName}/commit")
+                            .resolveTemplate("branchName", branchName)
+                            .queryParam("expectedHash", getHeadHash(branchName))
+                            .post(putWithIncorrectNewContentId)))
+        .isInstanceOf(NessieBadRequestException.class)
+        .hasMessage(
+            "Bad Request (HTTP/400): Content ids for new ('%s') and expected ('%s') content differ for key '%s'",
+            fakeId, assignedContentId, contentKey.toPathString());
+
+    // Attempt overwrite, specifying new and expected content IDs which match each other, but not existing data
+    Operations putWithMatchingFakeContentIds =
+        getPutOpSingleton(
+            type, fakeId, fakeId, contentKey, "put with matching fake content ids");
+    assertThatThrownBy(
+      () ->
+        unwrap(
+          () ->
+
+            getHttpClient()
+        .newRequest()
+        .path("trees/branch/{branchName}/commit")
+        .resolveTemplate("branchName", branchName)
+        .queryParam("expectedHash", getHeadHash(branchName))
+        .post(putWithMatchingFakeContentIds)))
+      .isInstanceOf(NessieBadRequestException.class)
+      .hasMessage("Bad Request (HTTP/400): Expected content-id '%s' conflicts with actual content-id '%s' for key '%s'",
+        fakeId, assignedContentId, contentKey);
   }
 
   void unwrap(Executable exec) throws Throwable {

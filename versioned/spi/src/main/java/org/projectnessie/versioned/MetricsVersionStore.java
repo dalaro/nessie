@@ -76,11 +76,12 @@ public final class MetricsVersionStore implements VersionStore {
       @Nonnull BranchName branch,
       @Nonnull Optional<Hash> referenceHash,
       @Nonnull CommitMeta metadata,
+      Boolean unsafeConflicts,
       @Nonnull List<Operation> operations,
       @Nonnull Callable<Void> validator)
       throws ReferenceNotFoundException, ReferenceConflictException {
     return this.<Hash, ReferenceNotFoundException, ReferenceConflictException>delegate2ExR(
-        "commit", () -> delegate.commit(branch, referenceHash, metadata, operations, validator));
+        "commit", () -> delegate.commit(branch, referenceHash, metadata, unsafeConflicts, operations, validator));
   }
 
   @Override

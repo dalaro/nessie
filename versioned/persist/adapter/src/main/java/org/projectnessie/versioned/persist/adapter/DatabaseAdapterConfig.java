@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.immutables.value.Value;
+import org.projectnessie.versioned.MergeResult;
 
 /**
  * Base database-adapter configuration type.
@@ -41,6 +42,7 @@ public interface DatabaseAdapterConfig {
   int DEFAULT_KEY_LIST_ENTITY_PREFETCH = 0;
   int DEFAULT_COMMIT_TIMEOUT = 500;
   int DEFAULT_COMMIT_RETRIES = Integer.MAX_VALUE;
+  String DEFAULT_CONTENT_ID_CONFLICT_CHECKS = "CAUTIOUS";
   int DEFAULT_PARENTS_PER_REFLOG_ENTRY = 20;
   int DEFAULT_RETRY_INITIAL_SLEEP_MILLIS_LOWER = 5;
   int DEFAULT_RETRY_INITIAL_SLEEP_MILLIS_UPPER = 25;
@@ -176,6 +178,15 @@ public interface DatabaseAdapterConfig {
   @Value.Default
   default int getCommitRetries() {
     return DEFAULT_COMMIT_RETRIES;
+  }
+
+  /**
+   *
+   * @return
+   */
+  @Value.Default
+  default String getContentIdConflictChecks() {
+    return DEFAULT_CONTENT_ID_CONFLICT_CHECKS;
   }
 
   /**

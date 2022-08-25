@@ -127,6 +127,21 @@ public interface DatabaseAdapter {
       throws ReferenceNotFoundException;
 
   /**
+   * Retrieve the content-keys that are "present" for the specified commit.
+   *
+   * @param commit    commit to retrieve the values for.
+   * @param keyFilter predicate to optionally skip specific keys in the result and return those as
+   *                  {@link Optional#empty() "not present"}, for example to implement a security policy.
+   * @param whitelist when non-null, the returned stream will contain only {@linkplain KeyListEntry} instances
+   *                  where {@linkplain KeyListEntry#getKey()} belongs to this {@code whitelist} parameter.
+   *                  When null, the returned stream contains everything.
+   * @return Ordered stream with content-keys, content-ids and content-types
+   * @throws ReferenceNotFoundException if {@code commit} does not exist.
+   */
+  Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
+      throws ReferenceNotFoundException;
+
+  /**
    * Commit operation, see {@link CommitParams} for a description of the parameters.
    *
    * @param commitParams parameters for the commit
@@ -353,4 +368,6 @@ public interface DatabaseAdapter {
 
   @VisibleForTesting
   void assertCleanStateForTests();
+
+  DatabaseAdapterConfig getConfig();
 }

@@ -34,6 +34,7 @@ dependencies {
   implementation("com.google.protobuf:protobuf-java")
   implementation("com.google.code.findbugs:jsr305")
   implementation("com.google.guava:guava")
+  implementation("org.slf4j:slf4j-api")
   compileOnly("com.fasterxml.jackson.core:jackson-annotations")
   compileOnly("org.eclipse.microprofile.openapi:microprofile-openapi-api")
   compileOnly("jakarta.validation:jakarta.validation-api")

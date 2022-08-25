@@ -41,6 +41,7 @@ import org.projectnessie.versioned.persist.adapter.ContentAndState;
 import org.projectnessie.versioned.persist.adapter.ContentId;
 import org.projectnessie.versioned.persist.adapter.ContentIdAndBytes;
 import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
+import org.projectnessie.versioned.persist.adapter.DatabaseAdapterConfig;
 import org.projectnessie.versioned.persist.adapter.Difference;
 import org.projectnessie.versioned.persist.adapter.KeyFilterPredicate;
 import org.projectnessie.versioned.persist.adapter.KeyListEntry;
@@ -114,6 +115,15 @@ public final class TracingDatabaseAdapter implements DatabaseAdapter {
       throws ReferenceNotFoundException {
     try (Traced ignore = trace("keys.stream").tag(TAG_HASH, commit.asString())) {
       return delegate.keys(commit, keyFilter);
+    }
+  }
+
+
+  @Override
+  public Stream<KeyListEntry> keys(Hash commit, KeyFilterPredicate keyFilter, Collection<Key> whitelist)
+      throws ReferenceNotFoundException {
+    try (Traced ignore = trace("keys.stream").tag(TAG_HASH, commit.asString())) {
+      return delegate.keys(commit, keyFilter, whitelist);
     }
   }
 
@@ -244,6 +254,11 @@ public final class TracingDatabaseAdapter implements DatabaseAdapter {
   @Override
   public void assertCleanStateForTests() {
     delegate.assertCleanStateForTests();
+  }
+
+  @Override
+  public DatabaseAdapterConfig getConfig() {
+    return delegate.getConfig();
   }
 
   @Override
